@@ -1,0 +1,76 @@
+================================================================================
+LLM PROMPTS USED
+================================================================================
+
+The problem statement requires that any prompt used while building this solution
+be documented. Every prompt is appended here as the project grows: what was
+asked, to which model, and what was done with the answer.
+
+
+--------------------------------------------------------------------------------
+1. SCOPING THE PROBLEM  (Claude Opus, via Claude Code)
+--------------------------------------------------------------------------------
+
+    here i have a project folder named Quest1 which is where i am going to
+    create a project that is given in the pdf file that i have attached. The
+    problem states that i have to find the frame where the dialogue is being
+    spoken. But i have an ambiguity, do i have to find the first on screen
+    dialogue (on screen dialogue refers to a person speaking a dialogue while
+    being in frame) or do i have to find the input dialogue.
+    Also here is my approach:
+    First use speech to text model to change the audio to a transcript along
+    with its timeline tag (xyz dialogue 0:10 to 0:50) and filter the frames
+    where any dialogue is being spoken. And again filter by checking if there
+    is any human in the frame. Here there is an ambiguity if a person wearing a
+    mask or turned around (google says turned around is off-screen) do i have
+    to check it as well. And with the remaining the dialogue and their
+    corresponding frame we will find the closest match to the given text and
+    display it or return the first element in the list if the problem is asking
+    for the first dialogue. How is this approach? Is it plausible? Lets not go
+    into code directly, first build the folder structure and give me a small
+    piece of code in the relevant folder that takes the url input and displays
+    it.
+
+Used for: resolving the ambiguity in the statement, critiquing the proposed
+approach, and generating the repository scaffolding.
+
+
+--------------------------------------------------------------------------------
+2. CORRECTING THE INTERPRETATION  (Claude Opus, via Claude Code)
+--------------------------------------------------------------------------------
+
+    I saw the video, he says the dialogue exactly at 5:26 in this video where
+    there are no text saying this. Also before this exact dialogue there are
+    plenty of text with title and cast name which are not the output. There
+    were multiple on screen dialogues facing the camera which are not the
+    output.
+
+Used for: overturning an incorrect OCR-primary hypothesis, and deriving the
+detector-vs-discriminator principle that removes all filtering stages from the
+design.
+
+
+--------------------------------------------------------------------------------
+3. VALIDATING THE FINAL APPROACH  (Claude Opus, via Claude Code)
+--------------------------------------------------------------------------------
+
+    will my idea work? if not explain the idea clearly which would work
+
+    Here also there is an ambiguity, if there is a person looking at the camera
+    and speaking it is an on screen dialogue but i think the problem suggests
+    just the frame where the dialogue is being spoken. Since that is the
+    solution which has practical real world application
+
+Used for: a stage-by-stage assessment of the proposed pipeline (ASR and fuzzy
+matching kept, speech-presence and person-detection filters removed, a
+forced-alignment precision stage added), and confirming the reading of
+"on-screen dialogue" recorded in DESIGN.md.
+
+
+--------------------------------------------------------------------------------
+4. RUNTIME PROMPTS
+--------------------------------------------------------------------------------
+
+None yet. If an LLM/VLM is used inside the pipeline at runtime (e.g. asking a
+vision model to confirm a subtitle line in a frame), the exact prompt template
+is recorded here.

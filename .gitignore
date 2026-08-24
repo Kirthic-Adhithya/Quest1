@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Downloaded media, decoded frames, model + transcript caches
+data/media/
+data/frames/
+data/cache/
+
+# Program results
+outputs/
+!**/.gitkeep
+
+# Local cache index
+data/media/.cache.json

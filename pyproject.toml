@@ -1,0 +1,26 @@
+[project]
+name = "quest1"
+version = "0.1.0"
+description = "Find the exact video frame in which a given dialogue first appears."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "av>=18.1.0",
+    "certifi>=2026.7.22",
+    "faster-whisper>=1.2.1",
+    "imageio-ffmpeg>=0.6.0",
+    "yt-dlp>=2026.8.19",
+]
+
+[project.scripts]
+quest1 = "quest1.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/quest1"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
