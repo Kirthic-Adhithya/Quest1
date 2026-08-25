@@ -8,11 +8,12 @@ wheels/
 
 # Virtual environments
 .venv
+.pytest_cache/
 
-# Downloaded media, decoded frames, model + transcript caches
+# Downloaded media, transcripts, and model weights (multi-GB; fetched on
+# first run, cached thereafter -- see DESIGN.md)
 data/media/
-data/frames/
-data/cache/
+data/models/
 
 # Program results
 outputs/
