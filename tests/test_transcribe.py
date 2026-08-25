@@ -1,18 +1,14 @@
 from quest1.audio.transcribe import Transcript, Word
 
 
-def test_joined_text_space_separates_words_in_order():
-    t = Transcript(
+def test_transcript_json_round_trip():
+    original = Transcript(
         words=[
-            Word(text="my", start=326.18, end=326.31, prob=0.99),
-            Word(text="mind", start=326.31, end=326.58, prob=0.98),
-            Word(text="rebels", start=326.58, end=327.02, prob=0.95),
+            Word(text="my", start=325.26, end=325.40, prob=0.98),
+            Word(text="mind", start=325.46, end=325.70, prob=0.97),
         ],
         language="en",
-        language_prob=0.99,
+        language_prob=1.0,
     )
-    assert t.joined_text() == "my mind rebels"
-
-
-def test_joined_text_empty_transcript():
-    assert Transcript(words=[], language="en", language_prob=1.0).joined_text() == ""
+    restored = Transcript.from_json(original.to_json())
+    assert restored == original

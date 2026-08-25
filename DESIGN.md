@@ -232,6 +232,366 @@ Default model: `large-v3` in `device="auto"` (CUDA on this machine, float16). Ex
 parameter so development can drop to `medium`/`small` for faster iteration without
 touching code.
 
+## Threshold raised from 70 to 80 after two real false positives
+
+Reported directly: `"I am the king"` returned `"I am in"`, and `"What is it"` returned
+`"What's"` -- both wrong, both confidently presented as answers. Computed the actual
+scores rather than guessing: `"i am in"` against `"i am the king"` scored **70.0** --
+exactly the old threshold, a razor-thin pass. `"what's"` against `"what is it"` scored
+**75.0**. Every genuine match verified so far in this project scores well clear of that:
+89.3, 94.7, 100.0. 80 sits cleanly in the 14-point gap between the worst false positive
+and the best genuine match, with margin on both sides.
+
+**Not just noise suppression -- this uncovered a real correctness bug.** Both reported
+phrases turned out to genuinely exist in the video. The old threshold let an earlier,
+coincidental, low-scoring match win under the earliest-wins policy *before the matcher
+ever got far enough to see the true occurrence*. Re-running both queries after the fix:
+
+- `"I am the king"` -> now correctly finds the exact (100.0) occurrence at 12:56.46,
+  rejecting the earlier "I am in" noise (70.0) outright.
+- `"What is it"` -> now correctly finds an exact (100.0) match at 04:44.34 -- and a
+  second exact occurrence exists later at 42:30.52; earliest-wins correctly picked the
+  first.
+
+Short target phrases (3-4 words) remain inherently more exposed to coincidental partial
+matches than longer ones -- a stricter threshold narrows this risk, it does not eliminate
+it for very short queries. Documented in `search/matcher.py` directly, with two new
+regression tests locking in the exact reported false positives (`test_matcher.py`).
+Verified the canonical reference match (frame 7798) is unaffected by the raise.
+
+## Two more real download bugs, found via a user running concurrent tests
+
+Investigating a "no output" report surfaced two unrelated, real problems -- not one.
+
+**1. Windows Defender racing yt-dlp's per-fragment rename.** HLS downloads write one
+small file per fragment then rename it; a real-time AV scan can briefly lock a
+just-written file, racing the rename (`WinError 32`). Traced to the exact yt-dlp
+mechanism, not guessed: `file_access_retries` (default 3, matching the observed "giving
+up after 3 retries") is a *separate* retry knob from `retries`/`fragment_retries`, with a
+default backoff of only 10ms between attempts -- far shorter than a typical AV scan.
+Fixed: raised to 10 attempts with a real backoff (`retry_sleep_functions`, 0.3-2s).
+Verified clean (zero rename errors) on an uncontended run.
+
+**2. A GPU-memory collision, unrelated to the code.** The "no output" turned out to be
+three `quest1` processes running concurrently (the user testing independently), each
+loading Whisper `large-v3` (~3-4GB VRAM). Confirmed via `nvidia-smi`: 7.7 GB of the
+RTX 4060's 8GB used, 100% utilization -- three processes were contending for a GPU that
+can only fit about two, producing near-total stall rather than any error. Not a code bug;
+resolved by stopping the extras. Worth stating plainly: this pipeline has never been
+built or tested for concurrent GPU sharing, and running more than one instance against
+the same GPU at once is unsupported.
+
+**3. The more serious one, found while re-verifying fix #1: a real, silent
+content-integrity bug that predates this session entirely.** A clean re-run downloaded a
+video **2 minutes shorter** than every previously-verified download (52:18 vs 54:21,
+74139 vs 78204 frames) -- with no error and exit code 0. Root cause: yt-dlp's
+`skip_unavailable_fragments` defaults to `True`, so a fragment that permanently fails
+after all retries is silently dropped and the download is still reported successful. This
+was always the default, unrelated to fix #1 -- every prior verified run simply never hit
+a permanently-failing fragment. For a tool whose entire purpose is exact-frame
+correctness, a silent partial download is worse than a loud one: it can silently shift or
+corrupt every frame number computed downstream with no signal anything went wrong.
+Confirmed the missing content was real, not just a shorter manifest, by comparing the
+transcript's ending against known content from earlier verified runs -- the new file cut
+off well before the episode's actual closing lines. Fixed: `skip_unavailable_fragments:
+False`, so a permanently-failing fragment now raises a catchable error that the existing
+outer retry loop handles (resuming via `continuedl`, not restarting from scratch) instead
+of silently truncating.
+
+**Both fixes verified together** with a clean, single-process, GPU-uncontended run:
+zero rename errors, full canonical duration (3261.74s / 78204 frames), and the same
+answer -- frame 7798, 05:25.222 -- as every other verified run, this time with a clean
+100.0 exact-match score.
+
+## Cache changed from "keep every video ever fetched" to single-slot
+
+Found via direct report: downloading a second (test) video left the first one's files
+untouched -- by design at the time (`_evict_stale` only evicted the *same* URL at a
+*different* quality; a genuinely different URL was always kept, specifically so
+switching back and forth between videos during development wouldn't re-pay a download).
+
+That default is wrong for deployment: a service meant to process one video at a time
+should not accumulate every video anyone has ever pointed it at. `fetch()` now calls a
+new `_evict_other_videos(dest_dir, keep_url)` at the top of every call, which removes the
+media file, audio, transcripts, and any partial-download leftovers for every *other*
+cached URL before proceeding -- so `data/media/` holds at most one video's files at a
+time, regardless of whether the current call is a cache hit or a fresh download.
+
+Verified for real, not just in tests: before the fix, `data/media/` held two videos at
+537 MB. Running the pipeline against the reference video afterward left `data/media/` at
+532 MB holding only that one video -- the other video's `.mp4`/`.wav`/`.transcript.json`
+and its cache-index entry were all gone. Re-running against the reference video again
+still hits its own cache normally (same-URL cache hits are unaffected).
+
+Trade-off, stated plainly: switching back and forth between two videos during development
+now re-downloads and re-transcribes each time, rather than keeping both cached. That cost
+is intentional -- it is the same cost as unbounded disk growth in a deployed instance,
+moved to the side where it is cheaper to pay.
+
+## Simplification pass: dead code found and removed
+
+Asked directly whether the code was "completely simplified." Audited rather than assumed:
+
+- **`ingest/downloader.py::ingest()`** -- a convenience wrapper (`fetch` + `probe` in one
+  call), never actually called anywhere; `pipeline.py` calls `fetch()`/`probe()`
+  separately. Removed.
+- **`audio/transcribe.py::Transcript.joined_text()`** -- built for an early substring-search
+  design that `search/matcher.py` never ended up using (the matcher scans word-indexed
+  windows directly, not a joined string). Only its own tests called it. Removed, along
+  with those two tests.
+- **`pipeline.py::run_match()` / `run_pipeline()`** -- the more significant find: real,
+  working, previously-verified orchestrator functions that had become **entirely
+  unreferenced** once `cli.py` was built in stage 6. `cli.py` needs per-stage progress
+  printing and the not-found near-miss diagnostic, neither of which these functions
+  provide, so it ended up re-implementing the same stage-3-through-5 sequence inline
+  instead of calling them -- leaving two parallel, silently-divergence-prone
+  implementations of "run the pipeline," only one of which was actually exercised.
+  Removed both; kept `run_transcription()` (stages 1-2, genuinely called by `cli.py`) and
+  the `Result` dataclass (genuinely constructed by `cli.py`).
+- **`cli.py`**'s own match-selection logic (`candidates = find_candidates(...); match =
+  candidates[0] if candidates else None`) was a smaller instance of the same problem --
+  it silently reimplemented exactly what `search/matcher.py::best_match()` already does.
+  Switched to calling `best_match()` directly.
+
+Verified after each change: full test suite (42 tests, two fewer than before --
+`joined_text`'s own tests went with it), plus a real end-to-end CLI run against the
+reference video, confirming the identical answer (frame 7798, 05:25.222) before and after.
+
+## Language generality: real limits found, one fixed
+
+Asked directly whether this works for "all languages Whisper covers." Checked rather than
+assumed, stage by stage:
+
+- **Stages 1-3 (ingest, transcribe, fuzzy-match) are genuinely language-agnostic.**
+  yt-dlp, Whisper (~99 languages), and rapidfuzz all operate on arbitrary Unicode text with
+  no script assumption.
+- **Stage 4 (forced alignment) was not**, and this was a real, confirmed bug, not a
+  hypothetical: MMS_FA's vocabulary is 27 unaccented Latin letters. Tested directly --
+  French (Latin script) tokenised fine; Russian raised a plain `KeyError` on the first
+  Cyrillic character. Non-Latin-script languages would have crashed stage 4 outright.
+
+**Fixed, not just documented.** The MMS_FA checkpoint is literally named
+`ctc_alignment_mling_uroman` -- it was trained to expect universally-romanised input for
+non-Latin scripts, via Meta's `uroman` tool. `align_words()` now romanises each target word
+individually (not the joined sentence, since romanising a whole string can change the
+number of space-separated pieces for some scripts, which would break the 1:1 mapping back
+to `WordAlignment`) before tokenising, while still reporting the *original*-script text in
+the result. Verified directly: Russian ("привет мир") and Hindi ("नमस्ते दुनिया") both now
+tokenise successfully post-romanisation, where they previously raised `KeyError`.
+Latin-script input romanises to itself, confirmed as a no-op on the reference video: same
+frame (7798), same timestamp (05:25.222), after the change.
+
+**Honest scope of what's verified**: the tokenisation crash is confirmed fixed. Full
+end-to-end forced alignment on real non-English audio was not tested (no non-English
+reference video was available), so the *alignment quality* for other languages -- as
+opposed to "does it crash" -- is unverified, not claimed.
+
+## Repository cleanup
+
+Two files were pure dead stubs, never imported anywhere: `utils/text.py` (a one-line
+docstring, superseded by `matcher.normalize()`) and `video/ocr.py` (planned OCR support,
+never built once the "on-screen dialogue" ambiguity was resolved in favour of audio -- see
+above). Both removed, along with the now-empty `utils/` package. `data/cache/` and
+`data/frames/` were scaffolded at project start but never actually written to by any
+stage (audio/transcripts live in `data/media/`, model weights in `data/models/`) --
+removed.
+
+Separately found while auditing: **`data/models/` was never gitignored**, and a handful
+of small HuggingFace-cache metadata files (config/tokenizer JSON, a lock file, an
+`.incomplete` partial blob -- largest ~2.4MB, not the actual multi-GB weights) had been
+committed in the very first commit, before this pipeline existed. Added to `.gitignore`
+and untracked (`git rm --cached`) so the multi-GB Whisper/MMS_FA weights this pipeline
+now downloads can never be accidentally committed.
+
+## Stage 6: final report, and the zero-flag run as the real acceptance test
+
+`report/output.py` renders the four required outputs (timestamp, frame, text, image) in
+the format the problem statement specifies, plus a machine-readable `result.json`. The
+no-match path (`render_not_found`) implements the policy from the matching-policy section
+above: state failure plainly, show the best rejected candidate for diagnosis, never
+present a low-confidence guess as the answer. Verified directly: a deliberately absent
+dialogue ("purple elephants dance on the moon tonight") correctly exits 1 and reports the
+nearest (below-threshold) candidate rather than a false answer.
+
+`cli.py` now runs all 6 stages in one invocation. The real acceptance test is the
+**zero-flag run** -- `uv run quest1`, nothing else -- since that is what an evaluator
+runs first. It uses auto-detect language, the riskier path documented above (known to
+mis-fire on this video's non-speech opening). It was run for real, not assumed to work:
+
+| Run | Language | Matched text | Score | Final frame |
+|---|---|---|---|---|
+| 1 | auto -> "la" (0.46 confidence) | "My mind rebels at stagnation" | 100.0 | 7798 |
+| 2 | en (forced) | "my mind rebels its stagnation" | 94.7 | 7798 |
+| 3 | en (forced) | "my mind dwells at stagnation" | 89.3 | 7798 |
+| 4 | auto -> "la" (0.46 confidence) | "My mind rebels at stagnation." | 100.0 | 7798 |
+
+Four independent full transcriptions of the same video, four different Whisper outputs
+for this phrase (two exact, two noisy), **one unchanging final frame**. This is the
+practical payoff of the layered design (fuzzy match to locate the right region, forced
+alignment against the *known* target text to pin the exact instant): the noisy,
+non-deterministic stage never has to be clean for the final answer to be reproducible.
+
+### Final result (canonical, reference video)
+
+```
+Timestamp : 05:25.222
+Frame     : 7798
+Text      : "My mind rebels at stagnation."
+```
+
+`outputs/answer_frame.png`, `outputs/result.json` -- both produced by every run above.
+
+## Stage 5: frame extraction, and a real off-by-one it caught
+
+`video/frames.py` seeks ~2s before the target onset (comfortably past any keyframe
+interval) and decodes forward, keeping the last frame whose own PTS is `<= onset` -- the
+frame that is actually on screen at that instant, not the nearest one.
+
+**Verifying against the decoded frame's own PTS immediately caught a real bug.** The
+nominal formula `Media.frame_at()` used `round(seconds * fps)`. For the reference video's
+actual refined onset (325.2615s), that gives frame **7799**. But `onset * fps = 7798.535`
+-- `round()` rounds up past the midpoint, while the correct question is *containment*:
+frame N is on screen for `[N/fps, (N+1)/fps)`, which for N=7798 is `[325.2392, 325.2809)`
+-- and 325.2615 falls inside it. The truly-decoded frame (verified against its own PTS)
+was frame **7798**, one less than the formula said. Fixed by switching `frame_at()` to
+`floor` (`int()` truncation, since inputs are non-negative), and, more importantly, by
+making the *decoded frame's own PTS* -- not the pre-computed formula -- the authoritative
+source for `Result.frame` and `Result.timestamp` in `pipeline.py`. `frame_at()` is now
+documented as a seek hint only, never the final answer.
+
+This is exactly the design principle stated back in the tech-stack section
+("read the decoded frame's PTS rather than trusting round(onset * fps) alone") --
+implementing stage 5 is what turned that principle into a caught, fixed, regression-tested
+bug rather than a latent one.
+
+### Result, stages 1-5 (reference video)
+
+| Field | Value |
+|---|---|
+| Timestamp | **05:25.222** (the decoded frame's own PTS) |
+| Frame | **7798** |
+| Image | 640x480 RGB, confirmed visually: Jeremy Brett as Holmes, camera-facing close-up |
+
+Saved to `outputs/answer_frame.png`. Note the timestamp changed from stage 4's raw
+325.2615s onset to the decoded frame's actual 325.2222s -- expected and correct: the
+onset says *where we asked to look*, the decoded PTS says *where the frame the codec
+actually returned begins*, and the second is what "the exact frame" means once an image
+has to back it up.
+
+## Stage 4: forced alignment, implemented and verified
+
+`audio/align.py` uses `torchaudio.pipelines.MMS_FA` (a Wav2Vec2 CTC model). Unlike
+Whisper, which has to guess what was said, forced alignment is given the exact text and
+only has to find where it falls in the audio -- a far more constrained problem, solved at
+the model's native frame rate (~20ms) rather than Whisper's ~200ms word boundaries.
+
+Critically, **the target dialogue is aligned, not whatever Whisper transcribed**. Stage
+2's wording can drift (observed: "at" heard as "its"), but the first word -- the only one
+whose onset actually matters, since that onset is the answer frame -- transcribed
+correctly in every run. Aligning the known-correct target text is strictly better than
+aligning Whisper's possibly-wrong guess.
+
+Mechanics: take stage 3's coarse `[match.start, match.end]` window, pad by 1s each side
+(`PADDING_SECONDS`) so an undershoot in Whisper's boundary doesn't clip the true onset out
+of the audio the aligner ever sees, decode just that few-second slice to a 16kHz mono
+tensor in memory (no temp file needed, unlike the full-audio extraction), run the CTC
+model, and read back per-word start/end in frames. Frame index converts to seconds via
+`clip_duration / num_output_frames`.
+
+**Verified on the reference video**: forced alignment placed the onset of "my" at
+**325.261s**, versus stage 3's word-timestamp estimate of 325.68s -- a real, measured
+28-frame->10-frame correction (converted through the video's 23.976 fps: stage 3 alone
+implies frame 7809; forced alignment refines this to **frame 7799**). This is the concrete
+evidence for why "the exact frame" needed a dedicated precision stage rather than trusting
+Whisper's timestamps directly.
+
+**Model caching**: like the Whisper weights, the ~1.2GB MMS_FA checkpoint is redirected
+via `torch.hub.set_dir()` to `data/models/torch_hub/`, not torch's global default cache --
+visible and gitignored alongside everything else this pipeline downloads.
+
+**Environment note**: `torch`/`torchaudio` were not previously part of this project's
+dependencies (only the global system Python had them, unrelated to this venv --
+faster-whisper uses CTranslate2 directly, not torch). Adding them required a CUDA-matched
+wheel index (`download.pytorch.org/whl/cu121`) scoped via `[tool.uv.sources]` to just
+those two packages, plus `[tool.uv] environments = ["sys_platform == 'win32'"]` --
+without that, `uv` resolves a lockfile that must also satisfy Linux, which pulls in
+torch's Linux-only `nvidia-cublas-cu12==12.1.3.1` pin, conflicting with the newer
+`nvidia-cublas-cu12` that CTranslate2 needs. `soundfile` was also required as
+torchaudio's audio I/O backend (`torchaudio.load` has no built-in backend by default).
+
+## Stage 3 implemented and proven against the real, messy transcript
+
+`search/matcher.py` implements the matching policy above: for each transcript position,
+score every window size in `[target_word_count - 3, target_word_count + 3]` (ASR wording
+drifts in length, not just content -- an inserted phrase or a dropped article changes the
+correct window size, not just its text), keep the best-scoring window per start position,
+then collapse overlapping detections down to one candidate per real occurrence
+(non-max suppression) before applying the threshold. `find_candidates` returns every
+survivor earliest-first for transparency; `best_match` returns just the first.
+
+**Proven against the forced-English re-transcription**, which is the noisier, more
+realistic case documented above (ASR heard "my mind is clear my mind rebels **its**
+stagnation", not the clean original wording): the matcher correctly recovered the target
+as a single collapsed candidate, `"my mind rebels its stagnation"`, score 94.7, correctly
+excluding the preceding "my mind is clear" preamble. This is the concrete justification
+for fuzzy matching over exact substring search -- the exact-match approach would have
+failed outright on this real transcript.
+
+### End-to-end result, stages 1-4 (reference video)
+
+| Field | Value |
+|---|---|
+| Timestamp | **05:25.261** |
+| Frame | **7799** (of 78204, 23.976 fps) |
+| Matched text (stage 3, informational only) | "my mind dwells at stagnation" |
+| Match score | 89.3 |
+| Onset source | forced alignment (stage 4), not the ASR word timestamp |
+
+### Reproducibility: three independent full transcription runs, three different wordings,
+### one stable answer
+
+Whisper is non-deterministic on this specific phrase across separate runs -- observed
+three distinct transcriptions of the same six words on three full 54-minute
+transcriptions: "rebels at" (clean), "rebels its", and "dwells at". Despite that, the
+**final frame answer was identical (7799) across the two runs where stage 4 was
+exercised** -- onset 325.2614s and 325.2615s, a 0.1ms difference.
+
+This is the layered design working as intended, not a coincidence: stage 3 only has to be
+*good enough* to locate the right multi-second window (it was, scoring 94.7 and 89.3 on
+two very differently-worded transcriptions of the same underlying audio); stage 4 then
+aligns the **fixed target text** -- not whatever stage 3 heard -- directly against the
+audio, so the precise answer is insulated from stage 3's wording noise entirely. The
+coarse stage can be noisy; the precise stage cannot be, and the architecture keeps those
+concerns separate on purpose.
+
+## Language auto-detection failure -- found on the real reference video
+
+The first full transcription run (large-v3, GPU) succeeded mechanically -- 4376 words,
+duration coverage 0.0s-3259.22s against a 3261.74s video -- and correctly located the
+target line at word index 320 ("My", start=324.740s = 05:24.74), with the surrounding
+context matching the real Conan Doyle continuation ("Give me problems, give me work,
+give me the most...") verbatim. But `info.language` reported **"la" (Latin) at only
+45.7% confidence** for what is an English production, and the transcript opened with the
+same phrase repeated three times verbatim ("I can't ever speak in private." x3) -- a
+known Whisper failure mode triggered by a wrong language tag.
+
+Root cause: Whisper's language ID samples roughly the first 30s of audio only. This
+video's first 30s is title music with little or no speech, so detection had almost
+nothing to go on and guessed wrong. Verified with a focused before/after comparison on
+just that window (`language=None` vs `language="en"`): auto-detect reproduced the
+verbatim triple-repeat; forcing English replaced it with different (still likely
+imperfect, since the window is mostly non-speech) but **not degenerately repeated**
+output. The repetition-loop failure mode specifically is tied to the wrong language tag,
+not to Whisper handling near-silent audio per se.
+
+Fix: `transcribe()` and `run_transcription()` (in `audio/transcribe.py` /
+`pipeline.py`) take an explicit `language: str | None = None` parameter rather than
+hardcoding a language or trusting auto-detect silently. `None` preserves generality for
+an unknown evaluation video/language; passing the known language explicitly (e.g. `"en"`
+for the reference video) avoids this class of error when the language is known ahead of
+time. Not defaulted to `"en"` in the library itself, since that would silently break
+generality for a genuinely non-English evaluation video -- the caller decides.
+
 ## Portability across sites (yt-dlp)
 
 `yt-dlp` supports ~1,800 extractors, and the ingest path (download / cache / probe) is

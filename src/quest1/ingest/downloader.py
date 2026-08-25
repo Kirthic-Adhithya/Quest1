@@ -109,8 +109,19 @@ class Media:
         return self.path.stat().st_size
 
     def frame_at(self, seconds: float) -> int:
-        """Nominal frame index for a timestamp. Verified against PTS at decode time."""
-        return round(seconds * float(self.fps))
+        """Nominal frame index containing `seconds` -- a seek hint, not the
+        final answer (that comes from the decoded frame's own PTS; see
+        `video/frames.py`).
+
+        Deliberately `floor`, not `round`: frame N is on screen for
+        `[N/fps, (N+1)/fps)`, a containment question, not a nearest-neighbour
+        one. `round` was tried first and produced a real off-by-one -- for a
+        real timestamp on the reference video, `round` gave frame 7799 while
+        the actually-decoded frame at that instant was 7798, because the
+        timestamp's fractional frame position (.535) was past round()'s .5
+        threshold despite still falling inside frame 7798's window.
+        """
+        return int(seconds * float(self.fps))
 
     def describe(self) -> str:
         mins, secs = divmod(self.duration, 60)
@@ -176,6 +187,31 @@ def _evict_stale(dest_dir: Path, url: str) -> None:
     for leftover in dest_dir.glob(f"{stale.stem}.*"):
         if leftover != dest_dir / CACHE_INDEX:
             leftover.unlink()
+
+
+def _evict_other_videos(dest_dir: Path, keep_url: str) -> None:
+    """Delete every cached video except `keep_url`, plus each one's audio,
+    transcripts, and any partial-download leftovers sharing its filename stem.
+
+    The cache originally kept every video ever fetched, so switching back and
+    forth between videos during development never re-paid a download. That
+    grows disk usage without bound, which is the wrong default for a deployed
+    instance meant to process one video at a time -- each `fetch()` call now
+    prunes the cache down to just the video currently being requested.
+    """
+    index = _read_index(dest_dir)
+    changed = False
+    for url, entry in list(index.items()):
+        if url == keep_url:
+            continue
+        stale = dest_dir / entry["filename"]
+        for leftover in dest_dir.glob(f"{stale.stem}.*"):
+            if leftover != dest_dir / CACHE_INDEX:
+                leftover.unlink(missing_ok=True)
+        del index[url]
+        changed = True
+    if changed:
+        _write_index(dest_dir, index)
 
 
 def _has_resolution_ladder(info: dict) -> bool:
@@ -250,17 +286,25 @@ def fetch(
 ) -> Download:
     """Download the media for `job` into `dest_dir`, reusing an existing copy.
 
-    A cached (url, quality) pair short-circuits before any network call, which
-    matters because the host is flaky: re-running the pipeline during
-    development should not depend on ok.ru being reachable at that moment.
-    Requesting a different quality for a URL you already have is *not* a cache
-    hit -- the stale file is deleted and a fresh download replaces it, so a
-    URL never accumulates more than one cached copy of itself on disk.
+    Only one video is ever kept in `dest_dir` at a time: every call evicts any
+    *other* cached video first (`_evict_other_videos`), so switching to a new
+    URL frees the previous video's download, audio, and transcripts rather
+    than accumulating them -- the right default for a deployed instance that
+    processes one video at a time, at the cost of needing to re-download if
+    you switch back and forth between videos during development.
+
+    A cached (url, quality) pair for the *current* URL still short-circuits
+    before any network call, which matters because the host is flaky:
+    re-running the pipeline during development should not depend on ok.ru
+    being reachable at that moment. Requesting a different quality for the
+    same URL is *not* a cache hit -- the stale file is deleted and a fresh
+    download replaces it.
 
     Connection resets from the host are retried with a linear backoff; only the
     final failure is surfaced.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
+    _evict_other_videos(dest_dir, job.url)
 
     cached = lookup_cached(dest_dir, job.url, quality)
     if cached is not None:
@@ -292,6 +336,25 @@ def fetch(
         # drop costs one chunk rather than the whole 50-minute file.
         "continuedl": True,
         "http_chunk_size": 10 * 1024 * 1024,
+        # On Windows, an HLS download writes and renames one small file per
+        # fragment. A real-time antivirus scanner (confirmed present: Windows
+        # Defender) can hold a brief lock on a just-written fragment file,
+        # racing yt-dlp's rename -- yt-dlp's *own* retry knob for this class
+        # of error is `file_access_retries` (default 3), completely separate
+        # from `retries`/`fragment_retries` above, and its default backoff
+        # between attempts is 10ms -- far shorter than a typical AV scan.
+        # Confirmed via yt-dlp's own source, not guessed. More attempts with a
+        # real backoff gives the lock time to clear instead of giving up fast.
+        "file_access_retries": 10,
+        "retry_sleep_functions": {"file_access": lambda n: min(0.3 * (n + 1), 2.0)},
+        # yt-dlp's default (skip_unavailable_fragments=True) silently drops any
+        # fragment that permanently fails and still reports success -- found in
+        # practice: a real run produced a video 2 minutes shorter than every
+        # previous verified download, with no error, no warning, exit code 0.
+        # For a tool whose entire purpose is exact-frame correctness, a silent
+        # partial download is worse than a loud failure: force an abort (which
+        # raises DownloadError, already retried by the loop below) instead.
+        "skip_unavailable_fragments": False,
     }
     if show_progress:
         options["progress_hooks"] = [_progress]
@@ -366,9 +429,3 @@ def _duration(container, stream) -> float:
     if container.duration is not None:
         return container.duration / av.time_base
     raise IngestError("Could not determine duration")
-
-
-def ingest(job: Job, dest_dir: Path, quality: str = DEFAULT_QUALITY) -> Media:
-    """Fetch and probe in one call - the entry point stage 2 will use."""
-    download = fetch(job, dest_dir, quality)
-    return probe(download.path, download.title)

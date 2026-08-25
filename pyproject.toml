@@ -9,6 +9,12 @@ dependencies = [
     "certifi>=2026.7.22",
     "faster-whisper>=1.2.1",
     "imageio-ffmpeg>=0.6.0",
+    "pillow>=12.3.0",
+    "rapidfuzz>=3.14.5",
+    "soundfile>=0.14.0",
+    "torch>=2.5.1",
+    "torchaudio>=2.5.1",
+    "uroman>=1.3.1.1",
     "yt-dlp>=2026.8.19",
 ]
 
@@ -24,3 +30,20 @@ packages = ["src/quest1"]
 
 [dependency-groups]
 dev = ["pytest>=8"]
+
+[tool.uv]
+# This project only runs on Windows in practice. Without this, uv resolves a
+# lockfile that must also be valid on Linux/macOS, which pulls in torch's
+# Linux-only nvidia-cublas-cu12==12.1.3.1 pin -- a constraint that never
+# actually applies here but still blocks resolution against the newer
+# nvidia-cublas-cu12 that CTranslate2/faster-whisper need.
+environments = ["sys_platform == 'win32'"]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }

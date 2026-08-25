@@ -8,6 +8,7 @@ from quest1.ingest.downloader import (
     CACHE_INDEX,
     IngestError,
     Media,
+    _evict_other_videos,
     _evict_stale,
     lookup_cached,
     probe,
@@ -40,6 +41,17 @@ def test_frame_at_handles_ntsc_rational_rate():
     # 29.97 fps: 326.204 s lands on frame 9776, not 9786 (which 30 fps would give).
     assert media.frame_at(326.204) == 9776
     assert round(326.204 * 30) == 9786
+
+
+def test_frame_at_floors_not_rounds():
+    """Real off-by-one caught via stage 5, using the reference video's actual
+    rational fps: onset 325.2615s -> onset*fps = 7798.524 -- round() gives
+    7799, but the frame actually on screen (verified against its own decoded
+    PTS) is 7798, since a frame's window is [index/fps, (index+1)/fps) --
+    containment, not nearest-neighbour."""
+    media = make_media(fps=Fraction(93844800, 3914087))
+    assert media.frame_at(325.2615) == 7798
+    assert round(325.2615 * float(media.fps)) == 7799  # the bug this guards against
 
 
 def test_probe_rejects_missing_file(tmp_path):
@@ -156,3 +168,48 @@ def test_evict_stale_removes_partial_download_leftovers(tmp_path):
 
 def test_evict_stale_is_a_noop_for_unknown_url(tmp_path):
     _evict_stale(tmp_path, "https://example.com/never-seen")  # must not raise
+
+
+def test_evict_other_videos_removes_everything_but_the_kept_url(tmp_path):
+    """Deploying should never accumulate every video ever fetched -- switching
+    to a new URL must free the previous video's files, not keep both."""
+    (tmp_path / "old.mp4").write_bytes(b"x" * 10)
+    (tmp_path / "old.wav").write_bytes(b"y" * 10)
+    (tmp_path / "old.en.transcript.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "keep.mp4").write_bytes(b"z" * 10)
+    (tmp_path / CACHE_INDEX).write_text(
+        json.dumps(
+            {
+                "https://example.com/old": {"filename": "old.mp4", "title": "Old", "quality": "sd"},
+                "https://example.com/keep": {"filename": "keep.mp4", "title": "Keep", "quality": "sd"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _evict_other_videos(tmp_path, "https://example.com/keep")
+
+    assert not (tmp_path / "old.mp4").exists()
+    assert not (tmp_path / "old.wav").exists()
+    assert not (tmp_path / "old.en.transcript.json").exists()
+    assert (tmp_path / "keep.mp4").exists()
+
+    remaining = json.loads((tmp_path / CACHE_INDEX).read_text(encoding="utf-8"))
+    assert list(remaining.keys()) == ["https://example.com/keep"]
+
+
+def test_evict_other_videos_is_a_noop_when_only_the_kept_url_is_cached(tmp_path):
+    (tmp_path / "keep.mp4").write_bytes(b"x" * 10)
+    (tmp_path / CACHE_INDEX).write_text(
+        json.dumps(
+            {"https://example.com/keep": {"filename": "keep.mp4", "title": "Keep", "quality": "sd"}}
+        ),
+        encoding="utf-8",
+    )
+    _evict_other_videos(tmp_path, "https://example.com/keep")
+    assert (tmp_path / "keep.mp4").exists()
+
+
+def test_evict_other_videos_is_a_noop_without_an_index(tmp_path):
+    _evict_other_videos(tmp_path, "https://example.com/keep")  # must not raise
+    assert not (tmp_path / CACHE_INDEX).exists()  # nothing written for an empty index
