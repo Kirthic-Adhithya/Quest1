@@ -15,6 +15,7 @@ no-op for English.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +23,7 @@ import av
 import numpy as np
 import torch
 import uroman
+from num2words import num2words
 from torchaudio.pipelines import MMS_FA as _BUNDLE
 
 from ..search.matcher import normalize
@@ -128,6 +130,32 @@ def _decode_clip(video_path: Path, start: float, end: float) -> torch.Tensor:
     return torch.from_numpy(data.astype(np.float32) / 32768.0)
 
 
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _spell_out_numbers(text: str) -> str:
+    """Replace digit sequences with their spoken-word form (e.g. "1.4" ->
+    "one point four") before alignment.
+
+    The CTC model's vocabulary is 27 Latin letters plus an apostrophe -- no
+    digits -- so any numeral in the target text used to crash its tokenizer
+    with a bare `KeyError` (confirmed: "1.4 billion years" raised
+    `KeyError('1')`). Alignment also genuinely needs words here, not digits:
+    it fits text to audio via phonetic content, and "1" isn't pronounceable
+    as a single phoneme the way "one" is.
+    """
+    def expand(match: re.Match) -> str:
+        raw = match.group(0)
+        if "." in raw:
+            whole, frac = raw.split(".", 1)
+            whole_words = num2words(int(whole)) if whole else "zero"
+            frac_words = " ".join(num2words(int(digit)) for digit in frac)
+            return f"{whole_words} point {frac_words}"
+        return num2words(int(raw))
+
+    return _NUMBER_RE.sub(expand, text)
+
+
 def align_words(
     video_path: Path,
     target_text: str,
@@ -139,7 +167,7 @@ def align_words(
     """Fit `target_text` onto the audio in [window_start, window_end] (+padding),
     returning one absolute-time span per word, in order.
     """
-    words = normalize(target_text).split()
+    words = normalize(_spell_out_numbers(target_text)).split()
     if not words:
         raise AlignError("Target text has no words to align.")
 

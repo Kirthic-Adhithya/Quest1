@@ -1,5 +1,12 @@
 from quest1.audio.transcribe import Transcript, Word
-from quest1.search.matcher import DEFAULT_THRESHOLD, Candidate, best_match, find_candidates, normalize
+from quest1.search.matcher import (
+    DEFAULT_THRESHOLD,
+    Candidate,
+    best_match,
+    best_near_miss,
+    find_candidates,
+    normalize,
+)
 
 
 def _words(*specs: tuple[str, float, float]) -> list[Word]:
@@ -128,3 +135,44 @@ def test_survivor_check_includes_exact_threshold_score():
     t = _transcript(("where", 5.0, 5.2), ("you", 5.2, 5.4))
     assert best_match(t, "who are you", threshold=80.0) is not None
     assert best_match(t, "who are you", threshold=80.0).score == 80.0
+
+
+def test_wrong_number_rejected_despite_high_score():
+    """Real false positive observed in practice: "1.4 billion years" matched
+    "4.5 billion years" at score 88.2 (comfortably above the default
+    threshold), because "billion years" alone carries most of the character
+    similarity and rapidfuzz can't tell the numbers apart. Numbers are exact
+    facts, not approximate text, and must be rejected even at a high score."""
+    from rapidfuzz import fuzz
+
+    raw_score = fuzz.ratio(normalize("1.4 billion years"), normalize("4.5 billion years"))
+    assert raw_score >= 80.0, "sanity check: the scoring trap must still be real"
+
+    t = _transcript(("4.5", 1.0, 1.3), ("billion", 1.3, 1.6), ("years", 1.6, 2.0))
+    assert best_match(t, "1.4 billion years") is None
+
+
+def test_matching_number_still_matches():
+    """The number check must not reject a genuine match -- same digits,
+    same surrounding words."""
+    t = _transcript(("1.4", 1.0, 1.3), ("billion", 1.3, 1.6), ("years", 1.6, 2.0))
+    assert best_match(t, "1.4 billion years") is not None
+
+
+def test_dialogue_without_numbers_is_unaffected():
+    """The number check must be a no-op when the target has no digits --
+    covered by every other test in this file too, but explicit here."""
+    t = _transcript(
+        ("My", 10.0, 10.2), ("mind", 10.2, 10.4), ("rebels", 10.4, 10.7),
+        ("at", 10.7, 10.8), ("stagnation.", 10.8, 11.2),
+    )
+    assert best_match(t, "My mind rebels at stagnation") is not None
+
+
+def test_near_miss_skips_a_number_mismatched_candidate():
+    """best_near_miss must not surface a numerically-wrong candidate as the
+    "closest" thing found -- that would misrepresent a different fact as an
+    almost-match. With nothing else in the transcript, there is no near
+    miss to report at all."""
+    t = _transcript(("4.5", 1.0, 1.3), ("billion", 1.3, 1.6), ("years", 1.6, 2.0))
+    assert best_near_miss(t, "1.4 billion years") is None

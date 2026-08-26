@@ -400,3 +400,34 @@ the actual verified result from a real run -- `result.json` and
 `answer_frame.png` copied from a genuine pipeline execution, not
 fabricated. README.md was restructured around getting a first run working:
 requirements, install, CLI run, web app run, then reference material.
+
+
+--------------------------------------------------------------------------------
+22. A REAL CRASH ON A NUMBER IN THE DIALOGUE, THEN A MATCHING-ACCURACY GAP
+--------------------------------------------------------------------------------
+
+    The dialogue box doesn't even accept a number -- typing "1.4 billion
+    years" for https://youtu.be/S7TUe5w6RHo produces "Unexpected error:
+    '1'".
+
+    [Follow-up, after root-causing the crash and reporting that the fix
+    also surfaced the video matching the wrong number ("4.5 billion years")
+    at a high score:] Yes, look into it.
+
+Used for: root-causing an actual crash rather than a vague "numbers don't
+work" -- confirmed directly that the forced-alignment model's vocabulary is
+27 Latin letters and an apostrophe, no digits at all, so `align_words()`
+handing it "1" and "4" as literal characters raised a bare `KeyError('1')`.
+Fixed by spelling numbers out before alignment ("1.4 billion years" ->
+"one point four billion years", via `num2words`) -- alignment matches audio
+phonetically, and "1" was never pronounceable as a phoneme anyway. Verified
+against the exact reported case: the crash is gone.
+
+That same real run then surfaced a second, distinct bug: the matcher found
+"4.5 billion years" (score 88.2, above threshold) instead of the actual
+"1.4 billion years" spoken later in the video, because "billion years"
+alone carries most of the character-level similarity and `rapidfuzz` has no
+notion that the numbers differ. Fixed by rejecting any candidate missing a
+digit the target mentions, regardless of score. Verified against the same
+real video end to end: it now finds the correct "1.4 billion years" at
+42:18, score 100.0, instead of the wrong match at the video's opening.

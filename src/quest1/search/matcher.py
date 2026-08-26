@@ -34,6 +34,25 @@ def normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _numbers(normalized_text: str) -> set[str]:
+    """Digit-only tokens in already-normalized text -- e.g. {"1", "4"} for
+    "1.4" (`normalize()` renders that as two separate word tokens "1 4")."""
+    return {tok for tok in normalized_text.split() if tok.isdigit()}
+
+
+def _has_target_numbers(candidate_text: str, target_numbers: set[str]) -> bool:
+    """True if every digit the target mentions actually appears in the
+    candidate. Character-level fuzzy matching can't tell numbers apart when
+    they share enough surrounding text: confirmed in practice, "1.4 billion
+    years" matched "4.5 billion years" at score 88.2, comfortably above the
+    default threshold, because "billion years" alone carries most of the
+    similarity. A number is an exact fact, not approximate text, so this is
+    a hard requirement on top of the score, not folded into it -- a target
+    with no digits is unaffected (`target_numbers` is empty, so this is
+    always true)."""
+    return target_numbers <= _numbers(normalize(candidate_text))
+
+
 @dataclass(frozen=True)
 class Candidate:
     """One word span in the transcript scored against the target dialogue."""
@@ -55,11 +74,14 @@ def find_candidates(
     """Every genuine occurrence of `dialogue` in `transcript`, earliest first.
 
     A genuine occurrence is one word span whose normalised text scores >=
-    `threshold` against the normalised target, after collapsing overlapping
-    detections (multiple window sizes at nearby start positions all firing on
-    the same underlying occurrence) down to one best-scoring candidate each.
+    `threshold` against the normalised target *and* contains every number
+    the target mentions (see `_has_target_numbers`), after collapsing
+    overlapping detections (multiple window sizes at nearby start positions
+    all firing on the same underlying occurrence) down to one best-scoring
+    candidate each.
     """
     target_norm = normalize(dialogue)
+    target_numbers = _numbers(target_norm)
     n = len(target_norm.split())
     words = transcript.words
     if n == 0 or not words:
@@ -102,7 +124,10 @@ def find_candidates(
             continue
         accepted.append(cand)
 
-    survivors = [c for c in accepted if c.score >= threshold]
+    survivors = [
+        c for c in accepted
+        if c.score >= threshold and _has_target_numbers(c.text, target_numbers)
+    ]
     survivors.sort(key=lambda c: c.start)
     return survivors
 

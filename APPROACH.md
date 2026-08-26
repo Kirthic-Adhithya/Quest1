@@ -12,8 +12,7 @@ in which that dialogue is spoken.
   problem statement supplies a target line and warns a different video/dialogue may be
   used at evaluation time. The program never guesses a video's "first line of dialogue."
 - The reference line is **spoken, not rendered on screen** (confirmed by watching the
-  reference video), so speech-to-text is the evidence, not OCR. (An OCR path was built
-  and deliberately removed -- see [prompts.txt](prompts.txt) #16.)
+  reference video), so speech-to-text is the evidence, not OCR.
 - **"The exact frame" is defined as** the frame containing the onset of the first word
   of the matched line, taken from that frame's own decoded timestamp, never from a
   `time * fps` formula.
@@ -86,6 +85,15 @@ not better.
   reliable dict key as-is -- `http://` vs `https://` for the same video hashed to two
   different entries in practice, causing silent redownloads. Fixed by normalizing scheme,
   host case, and trailing slash before every cache read/write.
+- **Numbers in the target are a hard requirement, not just scored text.** Confirmed in
+  practice: "1.4 billion years" matched "4.5 billion years" at score 88.2 (well above
+  threshold), because "billion years" alone carries most of the character-level
+  similarity and `rapidfuzz` has no notion that the numbers differ. A candidate is now
+  rejected outright if it's missing any digit the target mentions, regardless of score --
+  numbers are exact facts, not approximate text. Also, forced alignment's vocabulary is
+  Latin letters only, no digits at all, so a numeral used to crash its tokenizer with a
+  bare `KeyError`; numbers are now spelled out ("1.4" -> "one point four", via
+  `num2words`) before alignment ever sees them.
 
 ## Assumptions
 
@@ -105,8 +113,18 @@ not better.
 - **Single language assumption per video.** Whisper picks one language from the first
   ~30s and doesn't re-detect per segment; a video that switches languages partway
   through degrades outside that one assumption, which can cause a false negative if the
-  target line sits in a mismatched segment. Not fixed -- a real fix means per-segment
-  detection, a separate, larger feature.
+  target line sits in a mismatched segment. Not fixed here.
+  **Scope for improvement:** a real fix needs a different algorithm, not just a
+  parameter change -- `faster-whisper.transcribe()` only ever decodes with the one
+  language it's given (or auto-detects once); it never transcribes a single audio track
+  in more than one language per call. Handling a genuinely multi-language video would
+  mean: (1) splitting the audio into segments (e.g. by silence/speaker-change
+  boundaries, or fixed-size windows), (2) running language identification on each
+  segment independently (`WhisperModel.detect_language()`, already used elsewhere in
+  this project, is exactly the right tool here), then (3) transcribing each segment
+  with *its own* detected language and stitching the resulting word lists back into one
+  timeline before matching. This is a separate, larger feature from anything currently
+  built -- not attempted here.
 - **No VAD (voice-activity detection) filtering**, by explicit choice, after a report of
   inaccurate results from it -- the trade-off is that Whisper can still hallucinate
   generic text on a silent/non-speech opening (observed directly: a silent test clip
@@ -116,4 +134,16 @@ not better.
 - **Short target phrases** (3-4 words) are more exposed to a coincidental fuzzy match
   than longer ones; the threshold (81, tuned empirically against real false
   positives/negatives) narrows this without eliminating it.
+- **Number *form* mismatches are still unhandled, but low-risk in practice.** The number
+  gate above requires the same digits, not the same *spelling* -- if the target is typed
+  as "1.4" and Whisper transcribed the audio as "one point four" (or vice versa), neither
+  contains the other's digit tokens and the match is rejected, a false negative. For
+  decimals and quantities specifically, this is unlikely to actually happen: Whisper's
+  training data overwhelmingly renders that kind of number as digits, and this was
+  confirmed directly -- audio saying "1.4 billion years" transcribed as "1.4 billion
+  years", not spelled out. The real exposure is smaller conversational numbers ("three
+  sisters") and ordinals ("the first"), which often *do* stay as words. Not a hard
+  guarantee either way, since it's an emergent pattern from training data, not a
+  documented rule; a complete fix would need number-word canonicalization on top of the
+  current exact-digit check. Not built.
 - Non-English forced-alignment output is verified not to crash, not for real quality.
