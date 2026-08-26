@@ -73,7 +73,7 @@ the design.
 
 Used for: a stage-by-stage review of the pipeline (kept ASR + fuzzy matching,
 dropped person/speech-presence filters, added forced alignment as a precision
-stage), and confirming the "on-screen dialogue" reading that DESIGN.md documents.
+stage), and confirming the "on-screen dialogue" reading that APPROACH.md documents.
 
 
 --------------------------------------------------------------------------------
@@ -220,7 +220,7 @@ settling on a value informed by real test data instead of intuition.
 Used for: catching a real off-by-one in the matching logic -- the survivor
 check accepts a score equal to the threshold, so a threshold of exactly 80 did
 not actually reject a false positive that had scored exactly 80.0. This one
-value change was the fix; the reasoning is recorded in DESIGN.md.
+value change was the fix; the reasoning is recorded in APPROACH.md.
 
 
 --------------------------------------------------------------------------------
@@ -231,11 +231,11 @@ value change was the fix; the reasoning is recorded in DESIGN.md.
     it can reasonably be, while making it more readable. Replace the large
     "stage N" narrative comments with concise, per-function descriptions of
     what each function actually does. Clean up the README, and shorten
-    DESIGN.md substantially while keeping the architecture diagram, the core
-    idea, and the tech stack. Finally, update this file with the prompts that
-    genuinely contributed to development -- polish the wording if needed, but
-    don't include anything that didn't shape the project, and don't attach a
-    model name to any entry.
+    the design document substantially while keeping the architecture diagram,
+    the core idea, and the tech stack. Finally, update this file with the
+    prompts that genuinely contributed to development -- polish the wording
+    if needed, but don't include anything that didn't shape the project, and
+    don't attach a model name to any entry.
 
 Used for: the final documentation and readability pass -- this file included.
 
@@ -298,3 +298,105 @@ probes and transcribes the uploaded file directly, skipping the download
 step -- and, since quality selection only means something when there's a
 format ladder to choose from, it's hidden in the UI once a local file is
 selected rather than left showing but inert.
+
+
+--------------------------------------------------------------------------------
+18. FRAME NUMBER IN THE STATS ROW, AND CLICK-TO-WATCH-THE-MOMENT
+--------------------------------------------------------------------------------
+
+    Add the frame number to the stats row alongside the timestamp. Also:
+    clicking the matched frame should switch to the video view and play
+    from the exact moment the dialogue is spoken, not just from 0:00.
+
+Used for: adding the frame-number stat (the backend already returned it,
+it just wasn't displayed); and a real backend addition for the seek feature
+-- only a formatted timestamp string reached the browser, not raw seconds,
+so `web/jobs.py`'s result payload now also includes the decoded frame's own
+PTS in seconds, and the frame image became a clickable element that switches
+to the video tab and seeks to that exact point. Verified against a real
+`<video>` element, not just simulated state: a seek landed `currentTime`
+at the exact requested second and started playback.
+
+
+--------------------------------------------------------------------------------
+19. LANGUAGE-AWARE MODEL SELECTION: A FASTER MODEL FOR KNOWN ENGLISH
+--------------------------------------------------------------------------------
+
+    An idea: distil-large-v3 is several times faster than large-v3 but only
+    supports English. Use it for English and large-v3 for everything else
+    -- if automatic language detection actually works reliably enough to
+    decide between them.
+
+    [Follow-up, after discussing that auto-detect only samples the first
+    ~30s and a misdetected multi-language video would be a real risk if
+    routed to an English-only model:] Keep it simple -- if no language is
+    given, auto-detect and use large-v3 as today, no special-casing. If a
+    language is given, use it directly, no detection at all. And give the
+    language field a proper dropdown of every language Whisper supports,
+    since users won't know the codes to type.
+
+Used for: `pick_model_size()` in `audio/transcribe.py`, which switches to
+`distil-large-v3` only when the language is the literal, explicitly-given
+string "en" -- never for auto-detect, even if detection would have guessed
+English, since a misdetected non-English video would then hit a model
+architecturally incapable of representing it at all. Also added a `LANGUAGES`
+table (name for every one of large-v3's 100 supported codes -- faster-whisper
+exposes only the codes, not names) backing a new `/api/languages` endpoint
+and a real `<select>` dropdown in the web UI, replacing the earlier free-text
+language field. Verified end-to-end against a real upload job with
+`language=en`: the server actually downloaded and ran `distil-large-v3`,
+confirmed by the new model directory appearing in the weights cache.
+
+
+--------------------------------------------------------------------------------
+20. A REAL CACHING BUG, REPORTED AS "IT KEEPS REDOWNLOADING"
+--------------------------------------------------------------------------------
+
+    The same video redownloads every time instead of using the cache. Also,
+    display the matched dialogue text in the web UI the way the terminal
+    output already does.
+
+Used for: root-causing a real bug rather than assuming the cache was simply
+missing -- the on-disk cache index had the reference video stored under
+`http://ok.ru/...`, while every actual request in this project uses
+`https://ok.ru/...`; a plain string-keyed dict treated those as two
+different videos, so the (correct, already-working) cache logic never got a
+hit and silently redownloaded on every run. Fixed by normalising the cache
+key (scheme, host case, trailing slash) on every read, not just on write, so
+it self-heals existing on-disk state rather than needing a manual fix.
+Verified directly: a `fetch()` call against the previously-mismatched entry
+returned instantly from cache instead of redownloading. Also added a "Text"
+row to the web UI's result panel, matching the CLI's `Text : "..."` line,
+which was previously only reachable via the frame image's (invisible)
+alt text.
+
+
+--------------------------------------------------------------------------------
+21. FINAL SUBMISSION PASS: NAMING, DOCS, SAMPLE OUTPUT, DEAD CODE
+--------------------------------------------------------------------------------
+
+    Rename this file to prompts.txt (keeping the same curation approach as
+    before). Replace the design document with a concise APPROACH.md,
+    100-200 lines, covering the approach, design choices, algorithms and
+    techniques used, assumptions, and trade-offs. Clean and properly comment
+    the code. Rewrite README.md with clear run steps, requirements, and
+    dependencies. Include a sample input/output -- likely already sitting in
+    the cache from an earlier run. Remove any remaining unnecessary code and
+    dependencies.
+
+Used for: the submission-readiness pass. `DESIGN.md` (841 lines at its
+largest, already shortened once) became `APPROACH.md` at 119 lines,
+restructured under the requested headings rather than as a chronological
+bug journal. A real, audited dead-code/dependency sweep -- not just a
+skim -- found and removed: an unused `Job.host` property (only its own test
+referenced it), an unused `import torchaudio` in `align.py`, an orphaned
+HTML id with no CSS or JS reference, and a genuinely unused `soundfile`
+dependency (confirmed by actually uninstalling it and running a real forced
+alignment end to end before removing it from `pyproject.toml` -- torchaudio
+only needs it as an optional backend for `torchaudio.load()`/`.save()`,
+which this project never calls, decoding audio via PyAV directly instead).
+A `samples/` directory (not gitignored, unlike `outputs/`) was added with
+the actual verified result from a real run -- `result.json` and
+`answer_frame.png` copied from a genuine pipeline execution, not
+fabricated. README.md was restructured around getting a first run working:
+requirements, install, CLI run, web app run, then reference material.

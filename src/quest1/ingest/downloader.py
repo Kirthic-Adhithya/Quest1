@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import av
 import imageio_ffmpeg
@@ -65,6 +66,22 @@ CACHE_INDEX = ".cache.json"
 CR = "\r"
 
 
+def _cache_key(url: str) -> str:
+    """Normalize a URL for cache-key comparison, so trivial variations of
+    the same resource don't miss an otherwise-identical cache entry and
+    silently trigger a redownload. Confirmed as a real cause of one: the
+    same video, requested once as http:// and once as https://, was cached
+    under two different keys and never hit on the second request. Scheme is
+    folded to https (http/https serve the same resource on every site this
+    targets), host is lower-cased, and a trailing slash on the path is
+    dropped; the query string is kept since it can carry a real video id.
+    """
+    parts = urlsplit(url)
+    scheme = "https" if parts.scheme in ("http", "https") else parts.scheme.lower()
+    path = parts.path.rstrip("/") or parts.path
+    return urlunsplit((scheme, parts.netloc.lower(), path, parts.query, ""))
+
+
 class IngestError(RuntimeError):
     """Raised when the media cannot be fetched or read."""
 
@@ -110,11 +127,18 @@ class Media:
 
 
 def _read_index(dest_dir: Path) -> dict:
-    """Load the cache index, or an empty dict if it's missing/corrupt."""
+    """Load the cache index, or an empty dict if it's missing/corrupt.
+
+    Keys are re-normalised on every load, not just on write -- so an index
+    entry written before cache-key normalisation existed (or written by an
+    older version of this function) still matches on the next lookup,
+    instead of permanently missing and redownloading.
+    """
     try:
-        return json.loads((dest_dir / CACHE_INDEX).read_text(encoding="utf-8"))
+        raw = json.loads((dest_dir / CACHE_INDEX).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+    return {_cache_key(key): entry for key, entry in raw.items()}
 
 
 def _write_index(dest_dir: Path, index: dict) -> None:
@@ -131,7 +155,7 @@ def lookup_cached(dest_dir: Path, url: str, quality: str) -> Download | None:
     Quality is part of the cache key: a file fetched at "sd" is never handed
     back for an "hd" request.
     """
-    entry = _read_index(dest_dir).get(url)
+    entry = _read_index(dest_dir).get(_cache_key(url))
     if not entry or entry.get("quality") != quality:
         return None
     path = dest_dir / entry["filename"]
@@ -144,7 +168,7 @@ def _evict_stale(dest_dir: Path, url: str) -> None:
     """Delete `url`'s previous file plus any partial-download leftovers
     (`.part`, `.part-FragN.part`, `.ytdl`) sharing its filename stem, so a
     fresh attempt never resumes into state left by a different selection."""
-    entry = _read_index(dest_dir).get(url)
+    entry = _read_index(dest_dir).get(_cache_key(url))
     if not entry:
         return
     stale = dest_dir / entry["filename"]
@@ -157,16 +181,17 @@ def _evict_other_videos(dest_dir: Path, keep_url: str) -> None:
     """Delete every cached video except `keep_url` and its files, so the
     cache holds at most one video at a time -- a deployed instance processing
     one video per run should not accumulate every video ever fetched."""
+    keep_key = _cache_key(keep_url)
     index = _read_index(dest_dir)
     changed = False
-    for url, entry in list(index.items()):
-        if url == keep_url:
+    for key, entry in list(index.items()):
+        if key == keep_key:
             continue
         stale = dest_dir / entry["filename"]
         for leftover in dest_dir.glob(f"{stale.stem}.*"):
             if leftover != dest_dir / CACHE_INDEX:
                 leftover.unlink(missing_ok=True)
-        del index[url]
+        del index[key]
         changed = True
     if changed:
         _write_index(dest_dir, index)
@@ -291,7 +316,7 @@ def fetch(
                 title = info.get("title") or path.stem
 
             index = _read_index(dest_dir)
-            index[job.url] = {"filename": path.name, "title": title, "quality": quality}
+            index[_cache_key(job.url)] = {"filename": path.name, "title": title, "quality": quality}
             _write_index(dest_dir, index)
             return Download(path=path, title=title)
 

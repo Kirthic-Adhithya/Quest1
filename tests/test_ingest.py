@@ -8,6 +8,7 @@ from quest1.ingest.downloader import (
     CACHE_INDEX,
     IngestError,
     Media,
+    _cache_key,
     _evict_other_videos,
     _evict_stale,
     lookup_cached,
@@ -38,6 +39,38 @@ def test_probe_rejects_non_media_file(tmp_path):
     junk.write_bytes(b"not a video")
     with pytest.raises(IngestError):
         probe(junk)
+
+
+def test_cache_key_folds_http_and_https_to_the_same_key():
+    """Real bug found in practice: the same video, downloaded once as
+    http:// and once as https://, was cached under two different keys and
+    the second request never hit the first's cache -- a silent, unnecessary
+    redownload every time the scheme happened to differ."""
+    assert _cache_key("http://ok.ru/video/1") == _cache_key("https://ok.ru/video/1")
+
+
+def test_cache_key_lowercases_host_and_drops_trailing_slash():
+    assert _cache_key("https://OK.ru/video/1/") == _cache_key("https://ok.ru/video/1")
+
+
+def test_cache_key_keeps_distinct_paths_distinct():
+    assert _cache_key("https://ok.ru/video/1") != _cache_key("https://ok.ru/video/2")
+
+
+def test_lookup_cached_hits_despite_a_scheme_mismatch(tmp_path):
+    """The real-world case: fetched once under one scheme, looked up under
+    the other, must still be a cache hit, not a redownload."""
+    video = tmp_path / "abc.mp4"
+    video.write_bytes(b"x" * 10)
+    (tmp_path / CACHE_INDEX).write_text(
+        json.dumps(
+            {"http://example.com/v/1": {"filename": "abc.mp4", "title": "T", "quality": "sd"}}
+        ),
+        encoding="utf-8",
+    )
+    hit = lookup_cached(tmp_path, "https://example.com/v/1", "sd")
+    assert hit is not None
+    assert hit.path == video and hit.from_cache
 
 
 def test_lookup_cached_returns_none_without_index(tmp_path):

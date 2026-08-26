@@ -60,3 +60,27 @@ def test_upload_rejects_non_video_extension():
 def test_upload_rejects_missing_file():
     res = client.post("/api/jobs/upload", data={"dialogue": "hello"})
     assert res.status_code == 422
+
+
+def test_list_languages_includes_english_with_a_name():
+    res = client.get("/api/languages")
+    assert res.status_code == 200
+    langs = {entry["code"]: entry["name"] for entry in res.json()}
+    assert langs["en"] == "English"
+    assert len(langs) == 100
+
+
+def test_submit_rejects_unknown_language_code():
+    res = client.post(
+        "/api/jobs", json={"url": "https://example.com/v", "dialogue": "hello", "language": "xx"}
+    )
+    assert res.status_code == 400
+
+
+def test_upload_rejects_unknown_language_code():
+    res = client.post(
+        "/api/jobs/upload",
+        data={"dialogue": "hello", "language": "xx"},
+        files={"video": ("clip.mp4", b"not a real video", "video/mp4")},
+    )
+    assert res.status_code == 400

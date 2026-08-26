@@ -19,7 +19,7 @@ from . import __version__
 from .audio.align import DEFAULT_MODEL_DIR as ALIGN_MODEL_DIR
 from .audio.align import AlignError, load_aligner, refine_onset
 from .audio.extract import AudioExtractError
-from .audio.transcribe import DEFAULT_MODEL_DIR, DEFAULT_MODEL_SIZE, TranscribeError
+from .audio.transcribe import DEFAULT_MODEL_DIR, LANGUAGES, TranscribeError, pick_model_size
 from .ingest.downloader import DEFAULT_QUALITY, QUALITY_CHOICES, IngestError
 from .inputs import InvalidInputError, Job, build_job
 from .pipeline import Result, run_transcription
@@ -48,18 +48,21 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"Format to download (default: {DEFAULT_QUALITY})",
     )
     parser.add_argument(
-        "--language", default=None,
-        help="Force the transcription language (e.g. 'en'). Default: auto-detect. "
-             "Auto-detect can mis-fire on a non-speech opening (see DESIGN.md); "
-             "pass this explicitly when the language is known.",
+        "--language", default=None, choices=sorted(LANGUAGES),
+        help="Force the transcription language by code (e.g. 'en'; see LANGUAGES in "
+             "audio/transcribe.py for the full list). Default: auto-detect from the first "
+             "~30s of audio, which can mis-fire on a non-speech opening (see APPROACH.md).",
     )
     parser.add_argument(
         "--threshold", type=float, default=DEFAULT_THRESHOLD,
         help=f"Minimum fuzzy-match score (0-100) to accept a candidate (default: {DEFAULT_THRESHOLD})",
     )
     parser.add_argument(
-        "--model-size", default=DEFAULT_MODEL_SIZE,
-        help=f"Whisper model size (default: {DEFAULT_MODEL_SIZE}); smaller is faster for dev iteration",
+        "--model-size", default=None,
+        help="Whisper model size. Default: 'distil-large-v3' for --language en (several times "
+             "faster, English-only), 'large-v3' otherwise -- auto-detect always uses large-v3, "
+             "since a misdetected non-English video would otherwise hit a model that can't "
+             "represent it at all. Pass this explicitly to override either default.",
     )
     parser.add_argument("--media-dir", type=Path, default=DEFAULT_MEDIA_DIR, help=f"Download/cache dir (default: {DEFAULT_MEDIA_DIR})")
     parser.add_argument("--model-dir", type=Path, default=DEFAULT_MODEL_DIR, help=f"Whisper model cache dir (default: {DEFAULT_MODEL_DIR})")
@@ -102,12 +105,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     show_job(job)
+    model_size = args.model_size or pick_model_size(args.language)
 
     try:
         print("Downloading media and transcribing audio "
-              "(a long video can take several minutes on first run)...", flush=True)
+              f"(model={model_size}; a long video can take several minutes on first run)...", flush=True)
         media, transcript = run_transcription(
-            job, args.media_dir, args.quality, args.model_size, args.model_dir, args.language
+            job, args.media_dir, args.quality, model_size, args.model_dir, args.language
         )
         print(media.describe())
         print(f"Transcribed {len(transcript.words)} words "

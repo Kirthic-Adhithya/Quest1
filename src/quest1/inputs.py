@@ -23,11 +23,6 @@ class Job:
     url: str
     dialogue: str
 
-    @property
-    def host(self) -> str:
-        """Domain of the media URL, e.g. "ok.ru"."""
-        return urlparse(self.url).netloc
-
 
 def parse_url(raw: str) -> str:
     """Validate a media URL and return it normalised (whitespace stripped).

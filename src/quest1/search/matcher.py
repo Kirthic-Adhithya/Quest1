@@ -15,7 +15,7 @@ from rapidfuzz import fuzz
 
 from ..audio.transcribe import Transcript
 
-#: Empirically tuned, not theoretical -- see DESIGN.md for the false
+#: Empirically tuned, not theoretical -- see APPROACH.md for the false
 #: positives/negatives that moved this from 70 to 81. Note the survivor check
 #: below is `score >= threshold`, so this value itself is excluded only by
 #: scores strictly below it.

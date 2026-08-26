@@ -4,7 +4,7 @@ A single background worker thread processes jobs from a queue, never more
 than one concurrently. This is a direct consequence of a real incident: this
 pipeline was measured to need ~4GB of GPU VRAM per Whisper instance, and
 running three at once on an 8GB card produced near-total stalling rather than
-any error (see DESIGN.md). A web server makes concurrent submission trivial
+any error (see APPROACH.md). A web server makes concurrent submission trivial
 to trigger by accident -- two tabs, a refresh mid-run -- so jobs are queued
 and run strictly sequentially rather than firing a thread per request.
 
@@ -27,7 +27,7 @@ from typing import BinaryIO, Literal
 
 from ..audio.align import AlignError, load_aligner, refine_onset
 from ..audio.extract import AudioExtractError
-from ..audio.transcribe import TranscribeError
+from ..audio.transcribe import TranscribeError, pick_model_size
 from ..ingest.downloader import DEFAULT_QUALITY, IngestError, probe
 from ..inputs import InvalidInputError, build_job, parse_dialogue
 from ..pipeline import Result, run_transcription, transcribe_media
@@ -150,6 +150,7 @@ class JobManager:
         extract the frame, and record the result (or a not-found diagnosis)
         onto the job."""
         self._set(job, status="running", stage="Validating input")
+        model_size = pick_model_size(job.language)
 
         if job.upload_path is not None:
             dialogue = parse_dialogue(job.dialogue)
@@ -157,12 +158,14 @@ class JobManager:
             media = probe(job.upload_path, title=job.upload_path.stem)
             job.video_path = media.path
             self._set(job, stage="Transcribing audio (first run can take several minutes)")
-            transcript = transcribe_media(media, MEDIA_DIR, language=job.language)
+            transcript = transcribe_media(media, MEDIA_DIR, model_size, language=job.language)
         else:
             parsed = build_job(job.url, job.dialogue)
             dialogue = parsed.dialogue
             self._set(job, stage="Downloading media and transcribing audio (first run can take several minutes)")
-            media, transcript = run_transcription(parsed, MEDIA_DIR, job.quality, language=job.language)
+            media, transcript = run_transcription(
+                parsed, MEDIA_DIR, job.quality, model_size, language=job.language
+            )
             job.video_path = media.path
 
         self._set(job, stage="Matching dialogue against the transcript")

@@ -50,7 +50,7 @@ def test_empty_transcript_returns_no_match():
 
 
 def test_earliest_wins_not_highest_score():
-    """Policy from DESIGN.md: score gates whether a candidate counts as real;
+    """Policy from APPROACH.md: score gates whether a candidate counts as real;
     it never ranks among real candidates. A later, cleaner-sounding match must
     not beat an earlier, noisier-but-still-genuine one."""
     t = _transcript(
@@ -124,7 +124,7 @@ def test_survivor_check_includes_exact_threshold_score():
     """The survivor check is `score >= threshold`: a candidate scoring exactly
     the threshold must be accepted, not rejected. This is the exact boundary
     that made threshold=80 fail to reject the "where you" false positive --
-    confirmed real, not just a synthetic edge case (see DESIGN.md)."""
+    confirmed real, not just a synthetic edge case (see APPROACH.md)."""
     t = _transcript(("where", 5.0, 5.2), ("you", 5.2, 5.4))
     assert best_match(t, "who are you", threshold=80.0) is not None
     assert best_match(t, "who are you", threshold=80.0).score == 80.0

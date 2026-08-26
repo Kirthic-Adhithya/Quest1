@@ -21,7 +21,6 @@ from pathlib import Path
 import av
 import numpy as np
 import torch
-import torchaudio
 import uroman
 from torchaudio.pipelines import MMS_FA as _BUNDLE
 
@@ -185,6 +184,6 @@ def refine_onset(
     padding: float = PADDING_SECONDS,
 ) -> float:
     """The onset (absolute seconds) of the first word of `target_text` --
-    the answer frame's defining instant, per DESIGN.md's convention."""
+    the answer frame's defining instant, per APPROACH.md's convention."""
     words = align_words(video_path, target_text, window_start, window_end, aligner, padding)
     return words[0].start

@@ -40,9 +40,60 @@ _register_cuda_dll_dirs()
 from faster_whisper import WhisperModel  # noqa: E402 -- must follow the PATH fix above
 
 DEFAULT_MODEL_SIZE = "large-v3"
+#: Distilled, English-only model -- several times faster than large-v3 (the
+#: user measured ~6.3x) at decoding, but architecturally incapable of
+#: representing non-English audio, so it's only ever selected when the
+#: language is *known* to be English, never for auto-detect (see
+#: `pick_model_size`).
+DISTIL_MODEL_SIZE = "distil-large-v3"
 DEFAULT_MODEL_DIR = Path("data/models")
 
 _model_cache: dict[tuple, WhisperModel] = {}
+
+#: code -> display name, for every language large-v3 supports. Whisper has no
+#: bundled name table (only codes, via faster_whisper.tokenizer), so this is
+#: maintained here -- it's the CLI's --language choices and the web app's
+#: /api/languages response.
+LANGUAGES: dict[str, str] = {
+    "af": "Afrikaans", "am": "Amharic", "ar": "Arabic", "as": "Assamese",
+    "az": "Azerbaijani", "ba": "Bashkir", "be": "Belarusian", "bg": "Bulgarian",
+    "bn": "Bengali", "bo": "Tibetan", "br": "Breton", "bs": "Bosnian",
+    "ca": "Catalan", "cs": "Czech", "cy": "Welsh", "da": "Danish", "de": "German",
+    "el": "Greek", "en": "English", "es": "Spanish", "et": "Estonian",
+    "eu": "Basque", "fa": "Persian", "fi": "Finnish", "fo": "Faroese",
+    "fr": "French", "gl": "Galician", "gu": "Gujarati", "ha": "Hausa",
+    "haw": "Hawaiian", "he": "Hebrew", "hi": "Hindi", "hr": "Croatian",
+    "ht": "Haitian Creole", "hu": "Hungarian", "hy": "Armenian", "id": "Indonesian",
+    "is": "Icelandic", "it": "Italian", "ja": "Japanese", "jw": "Javanese",
+    "ka": "Georgian", "kk": "Kazakh", "km": "Khmer", "kn": "Kannada",
+    "ko": "Korean", "la": "Latin", "lb": "Luxembourgish", "ln": "Lingala",
+    "lo": "Lao", "lt": "Lithuanian", "lv": "Latvian", "mg": "Malagasy",
+    "mi": "Maori", "mk": "Macedonian", "ml": "Malayalam", "mn": "Mongolian",
+    "mr": "Marathi", "ms": "Malay", "mt": "Maltese", "my": "Myanmar",
+    "ne": "Nepali", "nl": "Dutch", "nn": "Nynorsk", "no": "Norwegian",
+    "oc": "Occitan", "pa": "Punjabi", "pl": "Polish", "ps": "Pashto",
+    "pt": "Portuguese", "ro": "Romanian", "ru": "Russian", "sa": "Sanskrit",
+    "sd": "Sindhi", "si": "Sinhala", "sk": "Slovak", "sl": "Slovenian",
+    "sn": "Shona", "so": "Somali", "sq": "Albanian", "sr": "Serbian",
+    "su": "Sundanese", "sv": "Swedish", "sw": "Swahili", "ta": "Tamil",
+    "te": "Telugu", "tg": "Tajik", "th": "Thai", "tk": "Turkmen",
+    "tl": "Tagalog", "tr": "Turkish", "tt": "Tatar", "uk": "Ukrainian",
+    "ur": "Urdu", "uz": "Uzbek", "vi": "Vietnamese", "yi": "Yiddish",
+    "yo": "Yoruba", "zh": "Chinese", "yue": "Cantonese",
+}
+
+
+def pick_model_size(language: str | None) -> str:
+    """`distil-large-v3` when English is explicitly requested; `large-v3`
+    for auto-detect (`language=None`) and every other language.
+
+    Deliberately never applies to auto-detect, even though detection could
+    land on English: a misdetected non-English video would then be
+    transcribed by a model that can't represent it at all, which is worse
+    than today's existing auto-detect risk of the multilingual model just
+    degrading on the wrong language (see APPROACH.md).
+    """
+    return DISTIL_MODEL_SIZE if language == "en" else DEFAULT_MODEL_SIZE
 
 
 class TranscribeError(RuntimeError):

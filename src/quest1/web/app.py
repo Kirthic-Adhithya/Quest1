@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from ..audio.transcribe import LANGUAGES
 from ..ingest.downloader import DEFAULT_QUALITY, QUALITY_CHOICES
 from .jobs import Job, manager
 
@@ -49,12 +50,23 @@ def _job_view(job: Job) -> dict:
 
 
 def _clean_language(language: str | None) -> str | None:
-    """Blank input means auto-detect; anything else is passed through as
-    the ISO language code faster-whisper expects (e.g. "en", "fr")."""
+    """Blank input means auto-detect; anything else must be one of the
+    codes large-v3 actually supports (the web UI offers these as a
+    dropdown, so anything else here means a raw API call bypassed it)."""
     if language is None:
         return None
     language = language.strip()
-    return language or None
+    if not language:
+        return None
+    if language not in LANGUAGES:
+        raise HTTPException(400, f"Unknown language code {language!r}.")
+    return language
+
+
+@app.get("/api/languages")
+def list_languages() -> list[dict]:
+    """Every language large-v3 supports, for the web UI's dropdown."""
+    return [{"code": code, "name": name} for code, name in sorted(LANGUAGES.items(), key=lambda kv: kv[1])]
 
 
 @app.post("/api/jobs")
