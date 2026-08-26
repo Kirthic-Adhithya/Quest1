@@ -1,10 +1,10 @@
-"""Shared stage-1/2 entry point, and the `Result` the CLI assembles stages 3-5 into.
+"""Shared download+transcribe entry point, and the `Result` type the CLI and
+web app both assemble once matching, alignment, and frame extraction finish.
 
-`cli.py` drives stages 3-5 (match / align / extract) itself rather than through
-functions here, since it needs to print progress and handle the "not found"
-near-miss diagnostic between each stage -- concerns that don't belong in a
-library function. `run_transcription` (stages 1-2) has no such per-stage
-concern, so it is shared as-is.
+`cli.py` and `web/jobs.py` drive matching/alignment/extraction themselves
+rather than through a shared function here, since each needs its own
+progress reporting -- a concern that doesn't belong in a library function.
+`run_transcription` has no such per-caller concern, so it's shared as-is.
 """
 
 from __future__ import annotations
@@ -28,23 +28,13 @@ def run_transcription(
     model_dir: Path = DEFAULT_MODEL_DIR,
     language: str | None = None,
 ) -> tuple[Media, Transcript]:
-    """Stages 1-2: get the media locally, then transcribe its audio.
+    """Download the media (if not already cached), then transcribe its audio
+    (if not already transcribed for this language). Both steps are cached to
+    disk, so a re-run only redoes whatever actually changed.
 
-    Each stage's own cache (download cache, decoded-audio cache) means a
-    re-run of this function during development only re-does whatever changed.
-
-    `language=None` auto-detects from the first ~30s of audio, which can be
-    unreliable when that window is non-speech (observed on the reference video:
-    detection landed on "la" at 46% confidence, and the transcript opened with
-    a phrase repeated three times verbatim -- a known Whisper failure mode
-    triggered by a wrong language tag). Pass the known language explicitly
-    when it's known ahead of time to avoid this class of error.
-
-    The transcript itself is cached to disk (unlike audio/model, this wasn't
-    obvious until a re-run with no cache silently re-ran a ~10-minute GPU
-    transcription for the reference video). Caching is keyed on `language`,
-    since re-transcribing with a different language argument must not return
-    a transcript produced under the previous one.
+    `language=None` auto-detects from the first ~30s of audio, which can
+    mis-detect on a non-speech opening; pass the language explicitly when
+    it's known. The transcript cache is keyed on language for this reason.
     """
     download = fetch(job, media_dir, quality)
     media = probe(download.path, download.title)
@@ -66,20 +56,23 @@ def run_transcription(
 
 @dataclass(frozen=True)
 class Result:
+    """The final answer: which candidate matched, the refined onset, and the
+    actually-decoded frame."""
+
     media: Media
     match: Candidate
-    onset: float  # forced-alignment-refined onset, seconds (a target, not the answer)
-    hit: FrameHit  # the actually-decoded frame; hit.index is the reported answer
+    onset: float  # forced-alignment onset, seconds -- a target, not the answer
+    hit: FrameHit  # the decoded frame; hit.index is the reported answer
 
     @property
     def timestamp(self) -> str:
-        """Timestamp of the actually-decoded frame (`hit.pts_time`), not the
-        raw alignment onset -- the two usually agree to a few ms, but when
-        they don't, the decoded frame is ground truth (see `video/frames.py`
-        and the frame_at() floor-vs-round bug this distinction caught)."""
+        """Timestamp of the actually-decoded frame, not the raw alignment
+        onset -- the two usually agree to a few ms, but the decoded frame is
+        ground truth when they don't."""
         mins, secs = divmod(self.hit.pts_time, 60)
         return f"{int(mins):02d}:{secs:06.3f}"
 
     @property
     def frame(self) -> int:
+        """The reported frame number."""
         return self.hit.index

@@ -1,10 +1,9 @@
-"""Stage 5 - decode the exact frame at a given onset.
+"""Decode the exact video frame on screen at a given onset time.
 
 PyAV, not OpenCV: `cv2.CAP_PROP_POS_FRAMES` seeking is approximate on several
-codecs -- it can silently land on the nearest keyframe, which may be seconds
-away. When the deliverable is "the exact frame," that is disqualifying. PyAV
-seeks by presentation timestamp and decodes forward, so the frame returned is
-the one actually asked for, not an approximation of it.
+codecs and can silently land on the nearest keyframe. PyAV seeks by
+presentation timestamp and decodes forward, so the frame returned is the one
+actually asked for.
 """
 
 from __future__ import annotations
@@ -32,14 +31,9 @@ class FrameExtractError(RuntimeError):
 
 @dataclass(frozen=True)
 class FrameHit:
-    """The decoded frame at (or just before) a target onset.
-
-    `index` and `pts_time` are both derived from the *decoded* frame's own
-    timestamp, never from the requested onset directly -- the onset says where
-    we asked to look; these say where the codec says the frame actually is.
-    Report `index` as the answer, not `round(onset * fps)` computed elsewhere,
-    so the reported frame number and the saved image can never disagree.
-    """
+    """The decoded frame at (or just before) a target onset. `index` and
+    `pts_time` come from the decoded frame's own timestamp, not the requested
+    onset, so the reported frame and the saved image can never disagree."""
 
     index: int
     pts_time: float
@@ -81,6 +75,10 @@ def extract_frame(video_path: Path, onset: float, fps: Fraction) -> FrameHit:
                 )
 
             image = best.to_ndarray(format="rgb24")
+            # round() is safe here specifically because best.time is the frame's
+            # own timestamp (index/fps exactly, modulo float error) -- rounding
+            # an arbitrary onset instead would be wrong (a real bug once: 7799
+            # vs the correct 7798), since a frame's window isn't a nearest-point.
             index = round(best.time * float(fps))
             return FrameHit(index=index, pts_time=best.time, image=image)
 

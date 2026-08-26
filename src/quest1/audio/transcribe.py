@@ -24,26 +24,10 @@ import torch
 
 
 def _register_cuda_dll_dirs() -> None:
-    """Make torch's bundled cuBLAS/cuDNN discoverable to CTranslate2 on Windows.
-
-    CTranslate2 (faster-whisper's backend) needs its own cuBLAS 12 / cuDNN 9
-    on its DLL search path. It does not need its *own copy* of them, though --
-    `torch` (a hard dependency of this project regardless, for stage 4's
-    forced alignment) already bundles equivalent DLLs in `torch/lib`. This
-    used to install a separate `nvidia-cublas-cu12`/`nvidia-cudnn-cu12` pip
-    package pair for the same DLLs -- ~2 GB of exact duplication with what
-    `torch` already ships, confirmed by inspecting `torch/lib` directly.
-    Pointing at torch's copies instead (verified: a real CUDA transcription
-    run succeeds using only these) removes that duplication entirely.
-
-    `os.add_dll_directory` alone is not enough: `ctypes.WinDLL` respects it,
-    but CTranslate2's own internal loader does not -- it uses the classic
-    `LoadLibrary` search order, which honours `PATH`, not
-    `AddDllDirectory`-registered directories. Prepending to `PATH` is the
-    mechanism that actually works, and this must run *before* `faster_whisper`
-    (and transitively `ctranslate2`) is imported, in case any CUDA probing
-    happens at import time rather than lazily on first inference call.
-    """
+    """Point CTranslate2 (faster-whisper's backend) at torch's bundled
+    cuBLAS/cuDNN on Windows, instead of installing a separate ~2GB copy of
+    the same libraries. Must run before `faster_whisper` is imported, since
+    CTranslate2's loader only honours PATH, not `os.add_dll_directory`."""
     if sys.platform != "win32":
         return
     torch_lib = str(Path(torch.__file__).parent / "lib")
@@ -58,6 +42,8 @@ from faster_whisper import WhisperModel  # noqa: E402 -- must follow the PATH fi
 DEFAULT_MODEL_SIZE = "large-v3"
 DEFAULT_MODEL_DIR = Path("data/models")
 
+_model_cache: dict[tuple, WhisperModel] = {}
+
 
 class TranscribeError(RuntimeError):
     """Raised when transcription cannot be produced."""
@@ -65,6 +51,8 @@ class TranscribeError(RuntimeError):
 
 @dataclass(frozen=True)
 class Word:
+    """One transcribed word with its timing and confidence."""
+
     text: str
     start: float
     end: float
@@ -73,11 +61,14 @@ class Word:
 
 @dataclass(frozen=True)
 class Transcript:
+    """A full transcription: every word, in order, plus detected language."""
+
     words: list[Word]
     language: str
     language_prob: float
 
     def to_json(self) -> str:
+        """Serialize for the on-disk transcript cache."""
         return json.dumps(
             {
                 "language": self.language,
@@ -91,6 +82,7 @@ class Transcript:
 
     @classmethod
     def from_json(cls, raw: str) -> "Transcript":
+        """Deserialize a cached transcript."""
         data = json.loads(raw)
         return cls(
             words=[Word(**w) for w in data["words"]],
@@ -105,40 +97,38 @@ def load_model(
     compute_type: str = "auto",
     download_root: Path = DEFAULT_MODEL_DIR,
 ) -> WhisperModel:
-    """Load (downloading and caching on first use) a Whisper model.
+    """Load (downloading and caching to disk on first use) a Whisper model.
 
     `device="auto"` picks CUDA when available and falls back to CPU, so the
     same call works in this environment (RTX 4060, float16) and elsewhere.
+
+    Also cached in-process (measured: ~10s to load `large-v3` onto the GPU),
+    keyed by every argument here -- a caller handling several jobs in one run
+    (the web app) only pays that cost once instead of once per job.
     """
-    download_root.mkdir(parents=True, exist_ok=True)
-    try:
-        return WhisperModel(
-            size,
-            device=device,
-            compute_type=compute_type,
-            download_root=str(download_root),
-        )
-    except Exception as exc:  # model download/load failures are varied; surface plainly
-        raise TranscribeError(f"Could not load Whisper model {size!r}: {exc}") from exc
+    key = (size, device, compute_type, str(download_root))
+    if key not in _model_cache:
+        download_root.mkdir(parents=True, exist_ok=True)
+        try:
+            _model_cache[key] = WhisperModel(
+                size,
+                device=device,
+                compute_type=compute_type,
+                download_root=str(download_root),
+            )
+        except Exception as exc:  # model download/load failures are varied; surface plainly
+            raise TranscribeError(f"Could not load Whisper model {size!r}: {exc}") from exc
+    return _model_cache[key]
 
 
 def transcribe(audio_path: Path, model: WhisperModel, language: str | None = None) -> Transcript:
-    """Transcribe `audio_path`, returning a flat, word-level `Transcript`.
+    """Transcribe `audio_path` into a flat, word-level `Transcript`.
 
-    `language=None` auto-detects from the first ~30s of audio. That window can
-    be title music or other non-speech content, which is a known trigger for
-    Whisper mis-detecting the language and then producing repetition loops or
-    hallucinated text (observed on the reference video: auto-detect landed on
-    "la" at 46% confidence, and the transcript opened with a phrase repeated
-    three times verbatim). Passing an explicit `language` skips detection
-    entirely and avoids this class of failure -- worth doing whenever the
-    video's language is known ahead of time, at the cost of the generality
-    auto-detection provides for an unknown input.
-
-    Words without a usable timestamp (rare, but faster-whisper can emit them
-    for e.g. non-speech noise) are dropped rather than kept with a fabricated
-    time -- a wrong timestamp is worse than a missing word here, since the
-    whole pipeline downstream trusts word.start as ground truth.
+    `language=None` auto-detects from the first ~30s of audio, which can
+    mis-detect on a non-speech opening (title music); pass the language
+    explicitly when it's known to avoid that. Words with no usable timestamp
+    are dropped rather than kept with a fabricated one, since downstream
+    code trusts word.start as ground truth.
     """
     if not audio_path.exists():
         raise TranscribeError(f"No such audio file: {audio_path}")

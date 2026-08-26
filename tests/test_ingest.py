@@ -28,32 +28,6 @@ def make_media(**overrides) -> Media:
     return Media(**{**defaults, **overrides})
 
 
-@pytest.mark.parametrize(
-    ("seconds", "expected"),
-    [(0.0, 0), (1.0, 25), (326.204, 8155), (3261.0, 81525)],
-)
-def test_frame_at_uses_probed_fps(seconds, expected):
-    assert make_media().frame_at(seconds) == expected
-
-
-def test_frame_at_handles_ntsc_rational_rate():
-    media = make_media(fps=Fraction(30000, 1001))
-    # 29.97 fps: 326.204 s lands on frame 9776, not 9786 (which 30 fps would give).
-    assert media.frame_at(326.204) == 9776
-    assert round(326.204 * 30) == 9786
-
-
-def test_frame_at_floors_not_rounds():
-    """Real off-by-one caught via stage 5, using the reference video's actual
-    rational fps: onset 325.2615s -> onset*fps = 7798.524 -- round() gives
-    7799, but the frame actually on screen (verified against its own decoded
-    PTS) is 7798, since a frame's window is [index/fps, (index+1)/fps) --
-    containment, not nearest-neighbour."""
-    media = make_media(fps=Fraction(93844800, 3914087))
-    assert media.frame_at(325.2615) == 7798
-    assert round(325.2615 * float(media.fps)) == 7799  # the bug this guards against
-
-
 def test_probe_rejects_missing_file(tmp_path):
     with pytest.raises(IngestError, match="No such media file"):
         probe(tmp_path / "nope.mp4")

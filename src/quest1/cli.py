@@ -17,13 +17,14 @@ from pathlib import Path
 
 from . import __version__
 from .audio.align import DEFAULT_MODEL_DIR as ALIGN_MODEL_DIR
-from .audio.align import PADDING_SECONDS, load_aligner, refine_onset
-from .audio.transcribe import DEFAULT_MODEL_DIR, DEFAULT_MODEL_SIZE
+from .audio.align import AlignError, load_aligner, refine_onset
+from .audio.extract import AudioExtractError
+from .audio.transcribe import DEFAULT_MODEL_DIR, DEFAULT_MODEL_SIZE, TranscribeError
 from .ingest.downloader import DEFAULT_QUALITY, QUALITY_CHOICES, IngestError
 from .inputs import InvalidInputError, Job, build_job
 from .pipeline import Result, run_transcription
 from .report.output import DEFAULT_OUTPUT_DIR, render, render_not_found
-from .search.matcher import DEFAULT_THRESHOLD, best_match, find_candidates
+from .search.matcher import DEFAULT_THRESHOLD, best_match, best_near_miss
 from .video.frames import FrameExtractError, extract_frame
 
 DEFAULT_URL = "https://ok.ru/video/248244667877"
@@ -70,6 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def show_job(job: Job) -> None:
+    """Print the header block: the URL and dialogue being searched for."""
     print("Quest1 - dialogue frame finder")
     print("=" * 60)
     print(f'URL        : {job.url}')
@@ -89,6 +91,8 @@ def open_file(path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse arguments and run the full pipeline: download, transcribe,
+    match, align, extract the frame, and print the report."""
     args = build_parser().parse_args(argv)
 
     try:
@@ -100,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     show_job(job)
 
     try:
-        print("Stage 1-2: downloading media and transcribing audio "
+        print("Downloading media and transcribing audio "
               "(a long video can take several minutes on first run)...", flush=True)
         media, transcript = run_transcription(
             job, args.media_dir, args.quality, args.model_size, args.model_dir, args.language
@@ -109,29 +113,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Transcribed {len(transcript.words)} words "
               f"(language={transcript.language}, confidence={transcript.language_prob:.2f}).")
 
-        print("Stage 3: matching dialogue against the transcript...", flush=True)
+        print("Matching dialogue against the transcript...", flush=True)
         match = best_match(transcript, job.dialogue, args.threshold)
 
         if match is None:
-            near_miss = None
-            all_candidates = find_candidates(transcript, job.dialogue, threshold=0.0)
-            if all_candidates:
-                near_miss = max(all_candidates, key=lambda c: c.score)
+            near_miss = best_near_miss(transcript, job.dialogue)
             print(render_not_found(job.dialogue, args.threshold, near_miss, args.output_dir))
             return 1
 
         print(f'Matched "{match.text}" (score={match.score:.1f}) at ~{match.start:.2f}s.')
 
-        print("Stage 4: refining onset via forced alignment...", flush=True)
+        print("Refining onset via forced alignment...", flush=True)
         aligner = load_aligner(args.align_model_dir)
-        onset = refine_onset(media.path, job.dialogue, match.start, match.end, aligner, PADDING_SECONDS)
+        onset = refine_onset(media.path, job.dialogue, match.start, match.end, aligner)
 
-        print("Stage 5: extracting the answer frame...", flush=True)
+        print("Extracting the answer frame...", flush=True)
         hit = extract_frame(media.path, onset, media.fps)
 
         result = Result(media=media, match=match, onset=onset, hit=hit)
 
-    except (IngestError, FrameExtractError) as exc:
+    except (IngestError, AudioExtractError, TranscribeError, AlignError, FrameExtractError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

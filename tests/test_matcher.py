@@ -109,3 +109,22 @@ def test_short_phrase_coincidental_match_rejected_at_default_threshold_2():
     a coincidental "What's" at score 75.0. Must now be rejected by default."""
     t = _transcript(("What's", 5.0, 5.3),)
     assert best_match(t, "What is it") is None
+
+
+def test_short_phrase_coincidental_match_rejected_at_default_threshold_3():
+    """Real false positive observed in practice: "who are you" (not spoken in
+    the reference video at all) wrongly matched a coincidental "where you" at
+    score 80.0 -- exactly the threshold tried and reverted. Must be rejected
+    by the actual default (81)."""
+    t = _transcript(("where", 5.0, 5.2), ("you", 5.2, 5.4))
+    assert best_match(t, "who are you") is None
+
+
+def test_survivor_check_includes_exact_threshold_score():
+    """The survivor check is `score >= threshold`: a candidate scoring exactly
+    the threshold must be accepted, not rejected. This is the exact boundary
+    that made threshold=80 fail to reject the "where you" false positive --
+    confirmed real, not just a synthetic edge case (see DESIGN.md)."""
+    t = _transcript(("where", 5.0, 5.2), ("you", 5.2, 5.4))
+    assert best_match(t, "who are you", threshold=80.0) is not None
+    assert best_match(t, "who are you", threshold=80.0).score == 80.0

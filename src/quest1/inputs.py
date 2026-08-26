@@ -25,6 +25,7 @@ class Job:
 
     @property
     def host(self) -> str:
+        """Domain of the media URL, e.g. "ok.ru"."""
         return urlparse(self.url).netloc
 
 
@@ -58,4 +59,5 @@ def parse_dialogue(raw: str) -> str:
 
 
 def build_job(url: str, dialogue: str) -> Job:
+    """Validate both inputs and build the Job the rest of the pipeline runs on."""
     return Job(url=parse_url(url), dialogue=parse_dialogue(dialogue))

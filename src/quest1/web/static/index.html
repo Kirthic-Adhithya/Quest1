@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quest1 - Dialogue Frame Finder</title>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --card: #ffffff;
+    --border: #e3e3e6;
+    --text: #1c1c1e;
+    --muted: #6b6b70;
+    --accent: #2f5fdb;
+    --accent-hover: #244aad;
+    --error: #c0392b;
+    --success: #1c7a3d;
+    --radius: 10px;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 48px 20px;
+    line-height: 1.5;
+  }
+  main {
+    width: 100%;
+    max-width: 640px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0 0 4px;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0 0 28px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--muted);
+  }
+  .field {
+    margin-bottom: 16px;
+  }
+  input[type="text"], select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--text);
+    background: #fff;
+  }
+  input[type="text"]:focus, select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(47, 95, 219, 0.12);
+  }
+  button {
+    width: 100%;
+    padding: 11px 16px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover:not(:disabled) { background: var(--accent-hover); }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+  .status {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .status.visible { display: flex; }
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #results, #notfound, #errorbox { display: none; }
+  #results.visible, #notfound.visible, #errorbox.visible { display: block; }
+
+  .field-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  .field-row:last-child { border-bottom: none; }
+  .field-row .k { color: var(--muted); }
+  .field-row .v { font-family: var(--mono); text-align: right; max-width: 60%; word-break: break-word; }
+
+  #frame-img {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    margin-top: 14px;
+    display: block;
+  }
+  .actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+  }
+  .actions a {
+    flex: 1;
+    text-align: center;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    color: var(--text);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .actions a:hover { background: var(--bg); }
+
+  #notfound { color: var(--text); }
+  #notfound .title { color: var(--error); font-weight: 600; margin-bottom: 6px; }
+  #notfound .near-miss { font-size: 13px; color: var(--muted); margin-top: 8px; }
+
+  #errorbox { color: var(--error); font-size: 14px; }
+
+  footer {
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Quest1</h1>
+  <p class="subtitle">Find the exact frame where a dialogue is spoken.</p>
+
+  <div class="card">
+    <form id="job-form">
+      <div class="field">
+        <label for="url">Video URL</label>
+        <input type="text" id="url" placeholder="https://ok.ru/video/248244667877" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="dialogue">Dialogue</label>
+        <input type="text" id="dialogue" placeholder="My mind rebels at stagnation" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="quality">Download quality</label>
+        <select id="quality">
+          <option value="mobile">Mobile</option>
+          <option value="lowest">Lowest</option>
+          <option value="low">Low</option>
+          <option value="sd" selected>SD</option>
+          <option value="hd">HD</option>
+          <option value="best">Best</option>
+        </select>
+      </div>
+      <button type="submit" id="submit-btn">Find frame</button>
+    </form>
+    <div class="status" id="status" style="margin-top: 14px;">
+      <div class="spinner"></div>
+      <span id="status-text">Working...</span>
+    </div>
+  </div>
+
+  <div class="card" id="results">
+    <div class="field-row"><span class="k">Timestamp</span><span class="v" id="r-timestamp"></span></div>
+    <div class="field-row"><span class="k">Frame</span><span class="v" id="r-frame"></span></div>
+    <div class="field-row"><span class="k">Text</span><span class="v" id="r-text"></span></div>
+    <div class="field-row"><span class="k">Match score</span><span class="v" id="r-score"></span></div>
+    <div class="field-row"><span class="k">Video</span><span class="v" id="r-title"></span></div>
+    <img id="frame-img" alt="Answer frame">
+    <div class="actions">
+      <a id="download-image" download>Download frame</a>
+      <a id="download-video" download>Download video</a>
+    </div>
+  </div>
+
+  <div class="card" id="notfound">
+    <div class="title">No confident match found</div>
+    <div id="nf-message"></div>
+    <div class="near-miss" id="nf-near-miss"></div>
+  </div>
+
+  <div class="card" id="errorbox"></div>
+
+  <footer>Done by: Kirthic Adhithya J</footer>
+</main>
+
+<script>
+const form = document.getElementById('job-form');
+const submitBtn = document.getElementById('submit-btn');
+const statusEl = document.getElementById('status');
+const statusText = document.getElementById('status-text');
+const results = document.getElementById('results');
+const notfound = document.getElementById('notfound');
+const errorbox = document.getElementById('errorbox');
+
+let pollTimer = null;
+
+function resetPanels() {
+  results.classList.remove('visible');
+  notfound.classList.remove('visible');
+  errorbox.classList.remove('visible');
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = document.getElementById('url').value.trim();
+  const dialogue = document.getElementById('dialogue').value.trim();
+  const quality = document.getElementById('quality').value;
+  if (!url || !dialogue) return;
+
+  resetPanels();
+  submitBtn.disabled = true;
+  statusEl.classList.add('visible');
+  statusText.textContent = 'Queued...';
+
+  try {
+    const res = await fetch('/api/jobs', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url, dialogue, quality}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({detail: 'Request failed.'}));
+      throw new Error(err.detail || 'Request failed.');
+    }
+    const job = await res.json();
+    poll(job.id);
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+function poll(jobId) {
+  pollTimer = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`);
+      if (!res.ok) throw new Error('Lost track of the job.');
+      const job = await res.json();
+      statusText.textContent = job.stage || 'Working...';
+
+      if (job.status === 'done') {
+        clearInterval(pollTimer);
+        showResult(jobId, job.result);
+      } else if (job.status === 'not_found') {
+        clearInterval(pollTimer);
+        showNotFound(job.result);
+      } else if (job.status === 'error') {
+        clearInterval(pollTimer);
+        showError(job.error || 'Something went wrong.');
+      }
+    } catch (err) {
+      clearInterval(pollTimer);
+      showError(err.message);
+    }
+  }, 1500);
+}
+
+function finishUI() {
+  submitBtn.disabled = false;
+  statusEl.classList.remove('visible');
+}
+
+function showResult(jobId, result) {
+  finishUI();
+  document.getElementById('r-timestamp').textContent = result.timestamp;
+  document.getElementById('r-frame').textContent = result.frame;
+  document.getElementById('r-text').textContent = `"${result.text}"`;
+  document.getElementById('r-score').textContent = result.score.toFixed(1);
+  document.getElementById('r-title').textContent = result.video_title;
+
+  const img = document.getElementById('frame-img');
+  img.src = `/api/jobs/${jobId}/image?t=${Date.now()}`;
+
+  const dlImg = document.getElementById('download-image');
+  dlImg.href = `/api/jobs/${jobId}/image`;
+  dlImg.download = `frame_${result.frame}.png`;
+
+  const dlVideo = document.getElementById('download-video');
+  dlVideo.href = `/api/jobs/${jobId}/video`;
+
+  results.classList.add('visible');
+}
+
+function showNotFound(result) {
+  finishUI();
+  document.getElementById('nf-message').textContent =
+    `No occurrence scored above the threshold (${result.threshold}).`;
+  const nm = document.getElementById('nf-near-miss');
+  if (result.near_miss) {
+    nm.textContent = `Closest candidate: "${result.near_miss.text}" at ${result.near_miss.timestamp}, score ${result.near_miss.score} (not returned as an answer).`;
+  } else {
+    nm.textContent = 'No candidate of any score was found in the transcript.';
+  }
+  notfound.classList.add('visible');
+}
+
+function showError(message) {
+  finishUI();
+  errorbox.textContent = message;
+  errorbox.classList.add('visible');
+}
+</script>
+</body>
+</html>

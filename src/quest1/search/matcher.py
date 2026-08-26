@@ -1,10 +1,9 @@
-"""Stage 3 - match the target dialogue against the ASR transcript.
+"""Fuzzy-match the target dialogue against the ASR transcript.
 
-Implements the matching policy from DESIGN.md: score decides what counts as a
-real match (threshold), time decides which real match is first (earliest
-start among survivors) -- never score, since a higher score means "ASR heard
-this one more cleanly," not "this occurrence came first." Two genuine
-occurrences of the same line are not more or less real than each other.
+Matching policy: score decides whether a candidate counts as a real match
+(threshold); time decides which real match is first (earliest start among
+survivors) -- never score, since a higher score just means ASR transcribed
+that occurrence more cleanly, not that it happened first.
 """
 
 from __future__ import annotations
@@ -16,21 +15,15 @@ from rapidfuzz import fuzz
 
 from ..audio.transcribe import Transcript
 
-#: 70 was the original default but let real false positives through: on real
-#: queries, "I am the king" wrongly matched "I am in" (score 70.0, right at
-#: the old cutoff) and "What is it" wrongly matched "What's" (75.0). Every
-#: verified *genuine* match observed in practice scores well clear of that --
-#: 89.3, 94.7, 100.0 -- so 80 sits in the gap: high enough to reject both
-#: observed false positives with margin, low enough to keep every real match
-#: seen so far. Short target phrases (3-4 words) are inherently more prone to
-#: this kind of coincidental partial match than longer ones -- a stricter
-#: threshold narrows the risk but does not eliminate it for very short queries.
-DEFAULT_THRESHOLD = 80.0
+#: Empirically tuned, not theoretical -- see DESIGN.md for the false
+#: positives/negatives that moved this from 70 to 81. Note the survivor check
+#: below is `score >= threshold`, so this value itself is excluded only by
+#: scores strictly below it.
+DEFAULT_THRESHOLD = 81.0
 #: How many words shorter/longer than the target a candidate window may be.
-#: ASR wording drifts from the target (contractions, small insertions like an
-#: extra "my mind is clear" observed in practice, a dropped article) without
-#: the underlying match being any less real, so the window size is searched
-#: over a small range rather than fixed to the target's exact word count.
+#: ASR wording drifts in length as well as content (contractions, a dropped
+#: article), so the window size is searched over a small range instead of
+#: being fixed to the target's exact word count.
 WINDOW_SLACK = 3
 
 
@@ -43,6 +36,8 @@ def normalize(text: str) -> str:
 
 @dataclass(frozen=True)
 class Candidate:
+    """One word span in the transcript scored against the target dialogue."""
+
     word_start: int
     word_end: int  # exclusive
     start: float
@@ -118,3 +113,11 @@ def best_match(
     """The first genuine occurrence of `dialogue`, or None if it never appears."""
     candidates = find_candidates(transcript, dialogue, threshold)
     return candidates[0] if candidates else None
+
+
+def best_near_miss(transcript: Transcript, dialogue: str) -> Candidate | None:
+    """The single best-scoring candidate regardless of threshold, for
+    diagnostics when nothing clears the real threshold: shows what came
+    closest instead of a bare "not found"."""
+    candidates = find_candidates(transcript, dialogue, threshold=0.0)
+    return max(candidates, key=lambda c: c.score) if candidates else None

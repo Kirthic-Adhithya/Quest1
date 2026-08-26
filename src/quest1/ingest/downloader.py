@@ -1,12 +1,8 @@
-"""Stage 1 - fetch the media behind the URL and probe its properties.
+"""Download media from a URL via yt-dlp, then probe its properties with PyAV.
 
-Two responsibilities, kept separate so either can be used alone:
-
-* `fetch`  - resolve a URL to a local file via yt-dlp, caching by video id.
-* `probe`  - read fps / frame count / duration / size out of the local file.
-
-Everything downstream converts between time and frame numbers using the `fps`
-reported here, so it is a `Fraction` (e.g. 25/1, 30000/1001) rather than a float.
+`fetch()` and `probe()` are kept separate so either can be used alone. Frame
+rate is a `Fraction` (e.g. 25/1, 30000/1001), never a float, since everything
+downstream converts between time and frame numbers using it.
 """
 
 from __future__ import annotations
@@ -24,26 +20,17 @@ import yt_dlp
 
 from ..inputs import Job
 
-#: ok.ru exposes named rungs rather than numeric heights; yt-dlp maps these for
-#: other sites too, falling back to "best available at or below this quality".
+#: ok.ru exposes named rungs rather than numeric heights; yt-dlp maps these
+#: for other sites too, falling back to "best available at or below this".
 QUALITY_CHOICES = ("mobile", "lowest", "low", "sd", "hd", "best")
 DEFAULT_QUALITY = "sd"
 
-#: Height-bounded selectors, ranked purely by real per-format resolution
-#: metadata -- never by a site's own literal format-id names.
-#:
-#: ok.ru's named tiers ("sd", "hd", ...) carry no resolution or bitrate at all
-#: (see DESIGN.md), so preferring them by name ahead of ranked formats is
-#: actively wrong: it is unranked data racing against ranked data, and which
-#: one "wins" depends on which alternative in the selector string happens to
-#: match first. Height-bounded ranking with no literal-name special case is
-#: deterministic on every site.
-#:
-#: Modern YouTube (and many other sites) serve DASH: video-only and audio-only
-#: streams with no single muxed format at all. A selector like "best[height<=480]"
-#: then matches nothing and download fails outright. Each tier therefore tries a
-#: separate video+audio pair first (merged by ffmpeg) and only falls back to a
-#: single muxed format for sites -- ok.ru included -- that offer one instead.
+#: Height-bounded format selectors, ranked by real per-format resolution
+#: metadata rather than a site's own tier names (ok.ru's named tiers carry no
+#: resolution/bitrate at all, so name-based preference is unranked data
+#: racing ranked data). Each tries a split video+audio pair first (needed on
+#: sites like YouTube that serve no single muxed format), falling back to a
+#: single muxed format where one exists.
 _GENERIC_FALLBACK = {
     "mobile": "worstvideo[height<=240]+worstaudio/worst[height<=240]/worst",
     "lowest": "worstvideo+worstaudio/worst",
@@ -55,25 +42,24 @@ _GENERIC_FALLBACK = {
 
 
 def _format_selector(quality: str) -> str:
+    """yt-dlp format-selector string for a quality name."""
     return _GENERIC_FALLBACK[quality]
 
-#: ok.ru intermittently resets connections mid-handshake, so extraction is
-#: retried rather than assumed to succeed on the first attempt.
+
+#: ok.ru intermittently resets connections mid-handshake; retried rather than
+#: assumed to succeed first try.
 MAX_ATTEMPTS = 5
 BACKOFF_SECONDS = 2.0
 
-#: The Odnoklassniki extractor tries a rich "desktop" page first (full HLS
-#: ladder, up to 2160p, with real resolution per variant) and silently falls
-#: back to a crippled "mobile" page (5 named tiers, no resolution/bitrate at
-#: all) on *any* error from the desktop attempt -- which our flaky host
-#: triggers often. The fallback succeeds without raising, so the ordinary
-#: retry loop never sees it as a failure. Metadata extraction is therefore
-#: retried on its own until the rich ladder is observed.
+#: ok.ru's extractor tries a rich "desktop" page (full format ladder with real
+#: resolution) and silently falls back to a crippled "mobile" page (no
+#: resolution data) on any error -- which succeeds without raising, so the
+#: ordinary retry loop never sees it as a failure. Retried separately until
+#: the rich ladder is actually observed.
 RICH_PROBE_ATTEMPTS = 6
 RICH_PROBE_BACKOFF = 1.5
 
 #: Maps URL -> downloaded filename, so a repeat run never touches the network.
-#: yt-dlp alone would still re-extract the page just to learn the output filename.
 CACHE_INDEX = ".cache.json"
 
 CR = "\r"
@@ -106,24 +92,11 @@ class Media:
 
     @property
     def size_bytes(self) -> int:
+        """File size on disk, in bytes."""
         return self.path.stat().st_size
 
-    def frame_at(self, seconds: float) -> int:
-        """Nominal frame index containing `seconds` -- a seek hint, not the
-        final answer (that comes from the decoded frame's own PTS; see
-        `video/frames.py`).
-
-        Deliberately `floor`, not `round`: frame N is on screen for
-        `[N/fps, (N+1)/fps)`, a containment question, not a nearest-neighbour
-        one. `round` was tried first and produced a real off-by-one -- for a
-        real timestamp on the reference video, `round` gave frame 7799 while
-        the actually-decoded frame at that instant was 7798, because the
-        timestamp's fractional frame position (.535) was past round()'s .5
-        threshold despite still falling inside frame 7798's window.
-        """
-        return int(seconds * float(self.fps))
-
     def describe(self) -> str:
+        """Human-readable summary: title, size, resolution, fps, duration."""
         mins, secs = divmod(self.duration, 60)
         return (
             f"Title      : {self.title}\n"
@@ -137,6 +110,7 @@ class Media:
 
 
 def _read_index(dest_dir: Path) -> dict:
+    """Load the cache index, or an empty dict if it's missing/corrupt."""
     try:
         return json.loads((dest_dir / CACHE_INDEX).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -144,21 +118,18 @@ def _read_index(dest_dir: Path) -> dict:
 
 
 def _write_index(dest_dir: Path, index: dict) -> None:
+    """Save the cache index; a write failure is logged, never fatal."""
     try:
-        (dest_dir / CACHE_INDEX).write_text(
-            json.dumps(index, indent=2), encoding="utf-8"
-        )
-    except OSError as exc:  # a broken cache must never break the pipeline
+        (dest_dir / CACHE_INDEX).write_text(json.dumps(index, indent=2), encoding="utf-8")
+    except OSError as exc:
         print(f"warning: could not write cache index: {exc}", file=sys.stderr)
 
 
 def lookup_cached(dest_dir: Path, url: str, quality: str) -> Download | None:
-    """Return a previously downloaded file for `url` at `quality`, or None.
+    """Previously downloaded file for `url` at `quality`, or None.
 
-    Quality is part of the cache key deliberately: a file fetched at "sd" must
-    never be handed back for a "hd" request. An old entry recorded before this
-    field existed (no "quality" key) is treated as a miss so it gets replaced
-    rather than silently trusted.
+    Quality is part of the cache key: a file fetched at "sd" is never handed
+    back for an "hd" request.
     """
     entry = _read_index(dest_dir).get(url)
     if not entry or entry.get("quality") != quality:
@@ -170,16 +141,9 @@ def lookup_cached(dest_dir: Path, url: str, quality: str) -> Download | None:
 
 
 def _evict_stale(dest_dir: Path, url: str) -> None:
-    """Delete a previously downloaded file for `url`, plus any leftover partial
-    download state (`.part`, `.part-FragN.part`, `.ytdl`) sharing its stem.
-
-    yt-dlp's own outtmpl is quality-agnostic (`%(id)s.%(ext)s`), so without this
-    a re-download would either be skipped (yt-dlp defaults to not overwriting an
-    existing file) or resume from partial-download state left by a *different*
-    selection than the one about to be attempted -- exactly what produced an
-    unfixed raw MPEG-TS file wearing an `.mp4` extension in practice. A fresh
-    attempt always starts from nothing.
-    """
+    """Delete `url`'s previous file plus any partial-download leftovers
+    (`.part`, `.part-FragN.part`, `.ytdl`) sharing its filename stem, so a
+    fresh attempt never resumes into state left by a different selection."""
     entry = _read_index(dest_dir).get(url)
     if not entry:
         return
@@ -190,15 +154,9 @@ def _evict_stale(dest_dir: Path, url: str) -> None:
 
 
 def _evict_other_videos(dest_dir: Path, keep_url: str) -> None:
-    """Delete every cached video except `keep_url`, plus each one's audio,
-    transcripts, and any partial-download leftovers sharing its filename stem.
-
-    The cache originally kept every video ever fetched, so switching back and
-    forth between videos during development never re-paid a download. That
-    grows disk usage without bound, which is the wrong default for a deployed
-    instance meant to process one video at a time -- each `fetch()` call now
-    prunes the cache down to just the video currently being requested.
-    """
+    """Delete every cached video except `keep_url` and its files, so the
+    cache holds at most one video at a time -- a deployed instance processing
+    one video per run should not accumulate every video ever fetched."""
     index = _read_index(dest_dir)
     changed = False
     for url, entry in list(index.items()):
@@ -215,23 +173,16 @@ def _evict_other_videos(dest_dir: Path, keep_url: str) -> None:
 
 
 def _has_resolution_ladder(info: dict) -> bool:
-    """True once the extracted metadata carries per-format resolution.
-
-    ok.ru's fallback "mobile" formats never report height/tbr at all, so a
-    format selector like "bestvideo+bestaudio" has nothing to rank by and picks
-    close to arbitrarily. The richer "desktop" path resolves the HLS manifest
-    into per-variant formats with a real width/height, which is what makes a
-    quality selector meaningful in the first place.
-    """
+    """True once extracted metadata carries real per-format resolution
+    (ok.ru's crippled fallback formats never report height at all)."""
     return any(f.get("height") for f in info.get("formats", []))
 
 
 def _extract_rich(url: str, options: dict) -> dict:
-    """Extract metadata, retrying until a real resolution ladder is present.
+    """Extract metadata, retrying until the rich resolution ladder appears.
 
-    A retry here is deliberately separate from `fetch`'s own retry loop: the
-    mobile fallback is not an exception, it is a successful-looking result with
-    worse data, so it would never trigger an ordinary error-triggered retry.
+    Kept separate from `fetch`'s own retry loop: the crippled fallback is not
+    an exception, just worse data, so it never triggers an error-based retry.
     """
     probe_options = {**options, "progress_hooks": []}
     best_seen: dict | None = None
@@ -246,9 +197,7 @@ def _extract_rich(url: str, options: dict) -> dict:
 
         if _has_resolution_ladder(info):
             return info
-        if best_seen is None or len(info.get("formats", [])) > len(
-            best_seen.get("formats", [])
-        ):
+        if best_seen is None or len(info.get("formats", [])) > len(best_seen.get("formats", [])):
             best_seen = info
         if attempt < RICH_PROBE_ATTEMPTS:
             time.sleep(RICH_PROBE_BACKOFF * attempt)
@@ -258,15 +207,15 @@ def _extract_rich(url: str, options: dict) -> dict:
 
     print(
         "warning: ok.ru only offered its limited mobile format list after "
-        f"{RICH_PROBE_ATTEMPTS} attempts (no per-format resolution data); "
-        "quality selection may not reflect the true best available.",
+        f"{RICH_PROBE_ATTEMPTS} attempts; quality selection may not reflect "
+        "the true best available.",
         file=sys.stderr,
     )
     return best_seen
 
 
 def _progress(status: dict) -> None:
-    """Single-line download progress, so a 50-minute episode is not a silent wait."""
+    """Single-line download progress, overwritten in place."""
     if status["status"] == "downloading":
         total = status.get("total_bytes") or status.get("total_bytes_estimate")
         done = status.get("downloaded_bytes", 0)
@@ -284,25 +233,10 @@ def fetch(
     quality: str = DEFAULT_QUALITY,
     show_progress: bool = True,
 ) -> Download:
-    """Download the media for `job` into `dest_dir`, reusing an existing copy.
-
-    Only one video is ever kept in `dest_dir` at a time: every call evicts any
-    *other* cached video first (`_evict_other_videos`), so switching to a new
-    URL frees the previous video's download, audio, and transcripts rather
-    than accumulating them -- the right default for a deployed instance that
-    processes one video at a time, at the cost of needing to re-download if
-    you switch back and forth between videos during development.
-
-    A cached (url, quality) pair for the *current* URL still short-circuits
-    before any network call, which matters because the host is flaky:
-    re-running the pipeline during development should not depend on ok.ru
-    being reachable at that moment. Requesting a different quality for the
-    same URL is *not* a cache hit -- the stale file is deleted and a fresh
-    download replaces it.
-
-    Connection resets from the host are retried with a linear backoff; only the
-    final failure is surfaced.
-    """
+    """Download the media for `job` into `dest_dir`, reusing a cached copy of
+    the same (url, quality) pair if one exists. Evicts every other cached
+    video first (single-video cache) and retries connection resets with a
+    linear backoff."""
     dest_dir.mkdir(parents=True, exist_ok=True)
     _evict_other_videos(dest_dir, job.url)
 
@@ -314,15 +248,11 @@ def fetch(
 
     options = {
         "format": _format_selector(quality),
-        # Video+audio pairs need muxing; yt-dlp does not discover the ffmpeg
-        # bundled by imageio-ffmpeg on its own.
+        # yt-dlp does not discover the ffmpeg bundled by imageio-ffmpeg on its own.
         "ffmpeg_location": imageio_ffmpeg.get_ffmpeg_exe(),
         "merge_output_format": "mp4",
-        # A single HLS format downloads as raw, unfixed MPEG-TS wearing an
-        # ".mp4" extension unless explicitly remuxed -- PyAV opens it (h264/aac
-        # decode fine) but the container carries no duration, which is exactly
-        # what broke `probe()` in practice. Force a real container regardless
-        # of how yt-dlp fetched the stream.
+        # A single HLS format downloads as raw MPEG-TS wearing an ".mp4"
+        # extension unless explicitly remuxed; force a real container.
         "postprocessors": [{"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"}],
         "outtmpl": str(dest_dir / "%(id)s.%(ext)s"),
         "quiet": True,
@@ -332,28 +262,20 @@ def fetch(
         "retries": 10,
         "fragment_retries": 10,
         "extractor_retries": 5,
-        # The host drops connections mid-transfer; chunking plus resume means a
-        # drop costs one chunk rather than the whole 50-minute file.
+        # The host drops connections mid-transfer; chunking + resume means a
+        # drop costs one chunk, not the whole file.
         "continuedl": True,
         "http_chunk_size": 10 * 1024 * 1024,
-        # On Windows, an HLS download writes and renames one small file per
-        # fragment. A real-time antivirus scanner (confirmed present: Windows
-        # Defender) can hold a brief lock on a just-written fragment file,
-        # racing yt-dlp's rename -- yt-dlp's *own* retry knob for this class
-        # of error is `file_access_retries` (default 3), completely separate
-        # from `retries`/`fragment_retries` above, and its default backoff
-        # between attempts is 10ms -- far shorter than a typical AV scan.
-        # Confirmed via yt-dlp's own source, not guessed. More attempts with a
-        # real backoff gives the lock time to clear instead of giving up fast.
+        # A real-time antivirus scan can briefly lock a just-written HLS
+        # fragment file, racing yt-dlp's rename. file_access_retries is a
+        # separate knob from retries/fragment_retries above, with a default
+        # 10ms backoff -- too short for a real scan; raised with real backoff.
         "file_access_retries": 10,
         "retry_sleep_functions": {"file_access": lambda n: min(0.3 * (n + 1), 2.0)},
-        # yt-dlp's default (skip_unavailable_fragments=True) silently drops any
-        # fragment that permanently fails and still reports success -- found in
-        # practice: a real run produced a video 2 minutes shorter than every
-        # previous verified download, with no error, no warning, exit code 0.
-        # For a tool whose entire purpose is exact-frame correctness, a silent
-        # partial download is worse than a loud failure: force an abort (which
-        # raises DownloadError, already retried by the loop below) instead.
+        # yt-dlp's default silently drops a permanently-failed fragment and
+        # still reports success (produced a video minutes shorter than
+        # expected with no error). Force an abort instead, so the retry loop
+        # below can actually recover rather than accept a silent partial file.
         "skip_unavailable_fragments": False,
     }
     if show_progress:
@@ -376,24 +298,16 @@ def fetch(
         except yt_dlp.utils.DownloadError as exc:
             last_error = exc
             if attempt < MAX_ATTEMPTS:
-                print(
-                    f"  attempt {attempt}/{MAX_ATTEMPTS} failed, retrying...",
-                    file=sys.stderr,
-                )
+                print(f"  attempt {attempt}/{MAX_ATTEMPTS} failed, retrying...", file=sys.stderr)
                 time.sleep(BACKOFF_SECONDS * attempt)
 
-    raise IngestError(
-        f"Could not download {job.url} after {MAX_ATTEMPTS} attempts: {last_error}"
-    )
+    raise IngestError(f"Could not download {job.url} after {MAX_ATTEMPTS} attempts: {last_error}")
 
 
 def probe(path: Path, title: str = "") -> Media:
-    """Read stream properties out of a local media file.
-
-    `frames` is absent from some containers, so fall back to duration * fps.
-    Downstream code treats frame_count as a bound, never as ground truth for a
-    specific frame -- that always comes from the decoded frame's own PTS.
-    """
+    """Read fps, duration, dimensions, and frame count from a local media
+    file. `frame_count` is a bound for display only -- a specific frame's
+    index always comes from that frame's own decoded PTS, not this value."""
     if not path.exists():
         raise IngestError(f"No such media file: {path}")
 
@@ -423,7 +337,7 @@ def probe(path: Path, title: str = "") -> Media:
 
 
 def _duration(container, stream) -> float:
-    """Prefer the stream's own duration, falling back to the container's."""
+    """Stream duration, falling back to the container's if the stream lacks one."""
     if stream.duration is not None and stream.time_base:
         return float(stream.duration * stream.time_base)
     if container.duration is not None:

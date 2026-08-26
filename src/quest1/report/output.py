@@ -1,4 +1,4 @@
-"""Stage 6 - render the result: timestamp, frame number, text, and the frame image.
+"""Render the final result: timestamp, frame number, text, and the frame image.
 
 Matches the output format given in the problem statement:
 
@@ -25,6 +25,9 @@ DEFAULT_OUTPUT_DIR = Path("outputs")
 
 @dataclass(frozen=True)
 class Report:
+    """What `render()` produces: the printable text plus where the image and
+    JSON record were written."""
+
     text: str
     image_path: Path
     json_path: Path
@@ -68,11 +71,9 @@ def render_not_found(
     near_miss: Candidate | None,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
 ) -> str:
-    """Report used when nothing in the transcript clears `threshold` --
-    per DESIGN.md's no-match policy: state failure plainly, surface the best
-    rejected candidate for diagnosis, never present a low-confidence guess as
-    if it were a confident answer.
-    """
+    """Report for when nothing clears `threshold`: state failure plainly and
+    show the best rejected candidate for diagnosis, never a guess presented
+    as a confident answer."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
     lines = [

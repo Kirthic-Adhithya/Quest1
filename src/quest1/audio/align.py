@@ -1,26 +1,16 @@
-"""Stage 4 - forced alignment: pin the exact onset of the first word.
+"""Forced alignment: pin the exact onset of the first word of the target text.
 
-Whisper's word timestamps (stage 2) drift by roughly +/-200ms, because it has
-to guess what was said. Forced alignment doesn't guess -- it fits the KNOWN
-target text onto the audio using a CTC acoustic model (MMS_FA / Wav2Vec2),
-which only has to answer "where does this exact text fall," a far easier
-problem. That model outputs one prediction roughly every 20ms, so alignment
-is precision to that scale rather than Whisper's ~200ms word boundaries.
+Whisper's word timestamps drift by roughly +/-200ms, because it has to guess
+what was said. Forced alignment doesn't guess -- it fits the KNOWN target
+text onto the audio with a CTC acoustic model (MMS_FA / Wav2Vec2), a much
+easier problem, at ~20ms precision instead of Whisper's ~200ms word
+boundaries. It aligns our target dialogue, not whatever Whisper transcribed,
+since Whisper's own wording can drift.
 
-We align our target dialogue, not whatever Whisper transcribed -- stage 2's
-own wording can drift (observed in practice: "at" heard as "its"), but the
-first word, which is what we need the onset of, transcribed correctly in
-every run, so aligning the known-correct target text is strictly better than
-aligning Whisper's guess.
-
-MMS_FA's vocabulary is 27 unaccented Latin letters -- it has no entries for
-Cyrillic, Devanagari, Arabic, CJK, etc., and tokenizing such text raises a
-plain KeyError (confirmed directly: Russian input crashes; French, already
-Latin-script, does not). The checkpoint is named
-`ctc_alignment_mling_uroman` precisely because it expects universal
-romanisation as a preprocessing step for non-Latin scripts, so target text is
-romanised via the `uroman` package before tokenising here. Latin-script input
-romanises to itself, so this adds no behaviour change for English.
+The model's vocabulary is 27 unaccented Latin letters, so non-Latin target
+text (Cyrillic, Devanagari, Arabic, CJK, ...) is romanised via `uroman`
+before tokenising -- Latin-script input romanises to itself, so this is a
+no-op for English.
 """
 
 from __future__ import annotations
@@ -43,6 +33,8 @@ DEFAULT_MODEL_DIR = Path("data/models")
 #: audio the aligner ever sees.
 PADDING_SECONDS = 1.0
 
+_aligner_cache: dict[tuple, "Aligner"] = {}
+
 
 class AlignError(RuntimeError):
     """Raised when forced alignment cannot be produced."""
@@ -50,6 +42,8 @@ class AlignError(RuntimeError):
 
 @dataclass(frozen=True)
 class Aligner:
+    """The loaded model, tokenizer, aligner, and romanizer `align_words` needs."""
+
     model: torch.nn.Module
     tokenizer: object
     align_fn: object
@@ -59,32 +53,44 @@ class Aligner:
 
 @dataclass(frozen=True)
 class WordAlignment:
+    """One word's aligned start/end time, in absolute video seconds."""
+
     text: str
-    start: float  # absolute seconds in the source video
+    start: float
     end: float
 
 
 def load_aligner(model_dir: Path = DEFAULT_MODEL_DIR, device: str | None = None) -> Aligner:
-    """Load (downloading and caching on first use) the MMS forced-alignment model.
+    """Load (downloading and caching to disk on first use) the MMS
+    forced-alignment model.
 
     Cached under `data/models/torch_hub`, not torch's default global cache, for
     the same reason the Whisper weights are redirected: visible and gitignored
     alongside everything else this pipeline downloads.
+
+    Also cached in-process (measured: ~5s to load), keyed by (model_dir,
+    device) -- a caller handling several jobs in one run (the web app) only
+    pays that cost once instead of once per job.
     """
-    model_dir.mkdir(parents=True, exist_ok=True)
-    torch.hub.set_dir(str(model_dir / "torch_hub"))
+    key = (str(model_dir), device)
+    if key not in _aligner_cache:
+        model_dir.mkdir(parents=True, exist_ok=True)
+        torch.hub.set_dir(str(model_dir / "torch_hub"))
 
-    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    try:
-        model = _BUNDLE.get_model().to(device)
-        model.eval()
-        tokenizer = _BUNDLE.get_tokenizer()
-        align_fn = _BUNDLE.get_aligner()
-        romanizer = uroman.Uroman()
-    except Exception as exc:  # download/load failures are varied; surface plainly
-        raise AlignError(f"Could not load forced-alignment model: {exc}") from exc
+        resolved_device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        try:
+            model = _BUNDLE.get_model().to(resolved_device)
+            model.eval()
+            tokenizer = _BUNDLE.get_tokenizer()
+            align_fn = _BUNDLE.get_aligner()
+            romanizer = uroman.Uroman()
+        except Exception as exc:  # download/load failures are varied; surface plainly
+            raise AlignError(f"Could not load forced-alignment model: {exc}") from exc
 
-    return Aligner(model=model, tokenizer=tokenizer, align_fn=align_fn, device=device, romanizer=romanizer)
+        _aligner_cache[key] = Aligner(
+            model=model, tokenizer=tokenizer, align_fn=align_fn, device=resolved_device, romanizer=romanizer
+        )
+    return _aligner_cache[key]
 
 
 def _decode_clip(video_path: Path, start: float, end: float) -> torch.Tensor:
