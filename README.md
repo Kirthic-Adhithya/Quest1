@@ -10,8 +10,12 @@ report its timestamp, frame number, the matched text, and a saved image of the f
 
 ## Requirements
 
-- **Windows.** The project only runs on Windows in practice (see `[tool.uv]` in
-  `pyproject.toml`); it has not been tested on Linux/macOS.
+- **Windows or Linux.** Developed and verified end-to-end on Windows. Linux is supported
+  in `pyproject.toml`'s dependency lock (`uv sync` resolves cleanly, including CUDA) but
+  hasn't been run on an actual Linux machine -- the platform-specific code (a Windows
+  DLL-path fix that already no-ops elsewhere, and `--open`'s file-opener) is written to
+  work there, this just hasn't been confirmed end-to-end. macOS isn't supported: the
+  pinned CUDA index has no meaning there (no CUDA on Apple Silicon or Intel Macs).
 - **Python 3.12+**
 - **[uv](https://docs.astral.sh/uv/)** for dependency management and running commands.
 - **An NVIDIA GPU with CUDA** is strongly recommended -- transcription and alignment fall

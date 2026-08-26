@@ -431,3 +431,56 @@ notion that the numbers differ. Fixed by rejecting any candidate missing a
 digit the target mentions, regardless of score. Verified against the same
 real video end to end: it now finds the correct "1.4 billion years" at
 42:18, score 100.0, instead of the wrong match at the video's opening.
+
+
+--------------------------------------------------------------------------------
+23. A DOWNLOAD-SPEED EXPERIMENT, MEASURED THEN REVERTED
+--------------------------------------------------------------------------------
+
+    Is it possible to speed up download using aria2? [After discussing that
+    aria2 needs an external binary outside uv's reach, and that yt-dlp has
+    a native concurrent-fragment option instead:] Ok lets try it. [After a
+    real measurement on YouTube showed no improvement, and a second test
+    against ok.ru was stopped mid-run:] Stop the task because I know that
+    ok.ru has a rate limit to their server. Pull the change entirely and
+    revert it back since there was no improvement.
+
+Used for: an honest experiment, not a guess presented as an improvement.
+Added `concurrent_fragment_downloads` to the download options and measured
+it directly rather than assuming it would help: a real before/after
+download of the same YouTube video showed no difference (28.8s vs 29.7s --
+a single connection was already at the bandwidth ceiling, so parallelism had
+nothing to gain). A second test against ok.ru was stopped before finishing,
+once a real, previously-undiscussed risk was raised: ok.ru is documented
+elsewhere in this project as unstable under load, and two back-to-back
+fresh downloads risked triggering rate limiting that would make any timing
+comparison meaningless anyway, independent of the setting being tested.
+Reverted cleanly since neither source showed a real improvement -- verified
+the file matched the prior commit exactly after reverting, not just that it
+looked right.
+
+
+--------------------------------------------------------------------------------
+24. LINUX SUPPORT
+--------------------------------------------------------------------------------
+
+    Does this app work on Mac and Linux? Is it possible to make it run on
+    Linux as well?
+
+Used for: a real investigation, not a guess -- grepped the whole codebase
+for platform-specific code first (found only two branches, both already
+handling non-Windows correctly: a Windows-only DLL-path fix that no-ops
+elsewhere, and `--open`'s file opener, which already falls back to
+`xdg-open` on Linux). The actual blocker was `pyproject.toml`'s dependency
+lock, explicitly restricted to Windows only because of a CUDA-package
+version conflict recorded in a comment there. Tested directly whether that
+conflict still applies by adding Linux to the platform list and running
+`uv lock` for real: it resolved cleanly with no conflict (the underlying
+packages have evidently updated since that comment was written), and `uv
+sync` confirmed the Linux-only packages it added are correctly skipped on
+this Windows machine, disturbing nothing here. macOS was deliberately left
+out: the pinned CUDA index is meaningless there. Documented plainly in
+README.md that Linux resolves cleanly but hasn't been run on an actual
+Linux machine -- dependency resolution was verified for real, runtime
+behavior was not, and the difference between those two is stated
+explicitly rather than implied.

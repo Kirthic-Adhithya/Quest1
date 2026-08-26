@@ -36,12 +36,14 @@ packages = ["src/quest1"]
 dev = ["pytest>=8"]
 
 [tool.uv]
-# This project only runs on Windows in practice. Without this, uv resolves a
-# lockfile that must also be valid on Linux/macOS, which pulls in torch's
-# Linux-only nvidia-cublas-cu12==12.1.3.1 pin -- a constraint that never
-# actually applies here but still blocks resolution against the newer
-# nvidia-cublas-cu12 that CTranslate2/faster-whisper need.
-environments = ["sys_platform == 'win32'"]
+# macOS excluded deliberately: the pinned CUDA index below has no meaning
+# there (no CUDA at all -- Apple Silicon uses MPS, Intel Macs have neither),
+# so it would need a different torch build and its own resolution, not just
+# adding a platform marker here. Windows is verified end-to-end (see
+# README.md); Linux resolves cleanly against this same CUDA index but is
+# untested at runtime -- no Linux machine available to confirm it actually
+# runs, only that `uv lock`/`uv sync` produce a consistent environment.
+environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
 
 [[tool.uv.index]]
 name = "pytorch-cu121"
