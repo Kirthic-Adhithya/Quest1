@@ -35,10 +35,6 @@ substance are unchanged.
     project's folder structure, plus a minimal script in the right place that
     takes a URL as input and confirms it's received correctly?
 
-Used for: resolving the "first on-screen dialogue vs. given input dialogue"
-ambiguity, critiquing the person-detection step in the proposed pipeline, and
-generating the initial repository scaffolding.
-
 
 --------------------------------------------------------------------------------
 2. CORRECTING THE INTERPRETATION AFTER WATCHING THE VIDEO
@@ -49,12 +45,6 @@ generating the initial repository scaffolding.
     cast-name text on screen that isn't the answer, and several moments where
     a person is facing the camera and speaking but isn't saying the target
     line either.
-
-Used for: overturning an initial OCR-first hypothesis in favour of audio as the
-primary signal, and deriving the detector-vs-discriminator principle (match
-against the specific target text, rather than detect generic "dialogue is
-present") that removed the person-detection and speech-presence filters from
-the design.
 
 
 --------------------------------------------------------------------------------
@@ -71,10 +61,6 @@ the design.
     clip search, dubbing), since none of those care whether a face happens to
     be in frame.
 
-Used for: a stage-by-stage review of the pipeline (kept ASR + fuzzy matching,
-dropped person/speech-presence filters, added forced alignment as a precision
-stage), and confirming the "on-screen dialogue" reading that APPROACH.md documents.
-
 
 --------------------------------------------------------------------------------
 4. LANGUAGE GENERALITY AND REPOSITORY HYGIENE
@@ -85,11 +71,6 @@ stage), and confirming the "on-screen dialogue" reading that APPROACH.md documen
     lot; are all of these files actually necessary? Remove anything that
     isn't.
 
-Used for: testing whether stage 3 (language-agnostic) and stage 4 (forced
-alignment) actually held up across scripts -- found and fixed a real crash on
-non-Latin text via romanisation -- and for a repository audit that removed two
-dead stub files and confirmed the rest were genuinely in use.
-
 
 --------------------------------------------------------------------------------
 5. A REAL DOWNLOAD FAILURE, REPORTED AS A BUG
@@ -99,12 +80,6 @@ dead stub files and confirmed the rest were genuinely in use.
     reset and "unable to rename file" errors partway through the download,
     ending in a crash rather than a clean result. Investigate and fix it.
 
-Used for: root-causing two separate, real bugs in the download path -- a
-Windows file-lock race between antivirus scanning and yt-dlp's fragment
-renaming, and yt-dlp's default of silently discarding a permanently-failed
-fragment while still reporting success, which had produced a video several
-minutes shorter than every previously verified download with no error at all.
-
 
 --------------------------------------------------------------------------------
 6. UNEXPLAINED "NO OUTPUT" WHILE RUNNING INDEPENDENT TESTS
@@ -113,12 +88,6 @@ minutes shorter than every previously verified download with no error at all.
     I'm running some test cases of my own alongside this session, but I'm not
     getting any output -- can you look into what's happening? [After the
     cause was found:] Stop all of the running processes.
-
-Used for: discovering that multiple pipeline instances were running
-concurrently and exhausting the GPU's memory, which produced severe stalling
-rather than any error message. This directly motivated the web app's later
-single-worker job queue, which processes one video at a time by design rather
-than one thread per request.
 
 
 --------------------------------------------------------------------------------
@@ -130,10 +99,6 @@ than one thread per request.
     through the entire repository -- what every file, function, and import
     does.
 
-Used for: a real dead-code audit that removed an unused convenience function,
-an unused method whose logic had been superseded, and duplicated logic across
-two call sites; followed by a complete, file-by-file explanation of the codebase.
-
 
 --------------------------------------------------------------------------------
 8. SINGLE-VIDEO CACHING FOR DEPLOYMENT
@@ -144,10 +109,6 @@ two call sites; followed by a complete, file-by-file explanation of the codebase
     want this to use as little disk space as possible, so please make sure
     switching to a new video actually cleans up the old one.
 
-Used for: changing the media cache from "keep every video ever fetched" to a
-single-video-at-a-time policy, evicting the previous video's download, audio,
-and transcript whenever a new URL is requested.
-
 
 --------------------------------------------------------------------------------
 9. REDUCING OVERALL DISK FOOTPRINT
@@ -155,11 +116,6 @@ and transcript whenever a new URL is requested.
 
     What's actually taking up so much disk space in this project, and is it
     possible to reduce it?
-
-Used for: a full breakdown of disk usage across the virtual environment, model
-cache, and media cache, which surfaced a real ~2GB duplication -- two separate
-copies of the same CUDA libraries installed for two different reasons -- and
-fixing it by pointing both consumers at the same copy.
 
 
 --------------------------------------------------------------------------------
@@ -172,11 +128,6 @@ fixing it by pointing both consumers at the same copy.
     caching the Whisper model locally, could it be called over the internet
     instead?
 
-Used for: a quantified justification of the alignment stage (measured
-precision gap against relying on ASR timestamps alone) and an honest
-comparison of local inference against a hosted transcription API, covering
-disk, latency, cost, privacy, and offline capability trade-offs.
-
 
 --------------------------------------------------------------------------------
 11. REQUESTING A WEB FRONTEND AND BACKEND
@@ -187,10 +138,6 @@ disk, latency, cost, privacy, and offline capability trade-offs.
     the dialogue, and it should display all the required outputs along with
     the frame image. Also add an option to download the source video. Keep
     the theme simple and clean.
-
-Used for: building the FastAPI backend, the job-queue system, and the
-browser UI end to end, verified against the running server rather than
-assumed to work.
 
 
 --------------------------------------------------------------------------------
@@ -205,22 +152,12 @@ assumed to work.
     the run. Run some real test cases and find where that boundary actually
     is, rather than guessing.
 
-Used for: an empirical investigation that confirmed the hypothesis -- a
-documented, previously-verified genuine match had scored 89.3 in one run, so
-raising the threshold to 90 would have rejected a correct answer -- and led to
-settling on a value informed by real test data instead of intuition.
-
 
 --------------------------------------------------------------------------------
 13. CATCHING A BOUNDARY BUG IN THE THRESHOLD FIX
 --------------------------------------------------------------------------------
 
     What if the threshold were 81 instead?
-
-Used for: catching a real off-by-one in the matching logic -- the survivor
-check accepts a score equal to the threshold, so a threshold of exactly 80 did
-not actually reject a false positive that had scored exactly 80.0. This one
-value change was the fix; the reasoning is recorded in APPROACH.md.
 
 
 --------------------------------------------------------------------------------
@@ -237,8 +174,6 @@ value change was the fix; the reasoning is recorded in APPROACH.md.
     if needed, but don't include anything that didn't shape the project, and
     don't attach a model name to any entry.
 
-Used for: the final documentation and readability pass -- this file included.
-
 
 --------------------------------------------------------------------------------
 15. ADDING QUALITY SELECTION TO THE WEB APP
@@ -246,10 +181,6 @@ Used for: the final documentation and readability pass -- this file included.
 
     Add a feature to select the download quality from the web app, the same
     way the CLI already can.
-
-Used for: exposing `--quality` in the web UI -- it already existed on the
-CLI, just wasn't wired into the browser form. Threaded through the request
-body, the job record, and the pipeline call.
 
 
 --------------------------------------------------------------------------------
@@ -261,15 +192,6 @@ body, the job record, and the pipeline call.
     review: is running both an OCR and an ASR search overkill here, or
     could this be exactly what evaluators are checking for -- doing what
     the client-side requirements actually call for, without over-engineering?
-
-Used for: reverting the OCR path entirely -- the extraction module, the
-on-screen-text matching functions, the CLI/web source selector, and the
-now-unused dependencies. The problem statement gives the dialogue as spoken
-text to search for; a second full search modality wasn't something it asked
-for, and the project's own stated design principle (match the specific
-target, don't build detectors you don't need) argued against keeping it.
-Quality selection, requested in the same original prompt, was kept -- it's a
-small, genuinely useful option, not a second search modality.
 
 
 --------------------------------------------------------------------------------
@@ -283,22 +205,6 @@ small, genuinely useful option, not a second search modality.
     frontend in line with it, reusing its modules where that makes sense,
     and improve anything it's missing.
 
-Used for: recreating that design (the two-column layout, the olive theme,
-the source/viewer split, the frame-vs-video toggle, drag-and-drop) directly
-in the existing single-file HTML/CSS/JS, rather than adopting its React +
-TanStack + Bun toolchain -- that reference project was a UI mockup with no
-real backend (its "Find Frame" button was a stubbed timeout), and pulling in
-an entire second language ecosystem and build step for a page this simple
-would be the same kind of unjustified complexity the OCR reversion above
-was about avoiding. Also added the two capabilities the reference called for
-that didn't exist yet: a language field (wired to the transcription
-language, previously hardcoded to auto-detect in the web app) and local
-video upload as an alternative to a URL (`POST /api/jobs/upload`), which
-probes and transcribes the uploaded file directly, skipping the download
-step -- and, since quality selection only means something when there's a
-format ladder to choose from, it's hidden in the UI once a local file is
-selected rather than left showing but inert.
-
 
 --------------------------------------------------------------------------------
 18. FRAME NUMBER IN THE STATS ROW, AND CLICK-TO-WATCH-THE-MOMENT
@@ -307,15 +213,6 @@ selected rather than left showing but inert.
     Add the frame number to the stats row alongside the timestamp. Also:
     clicking the matched frame should switch to the video view and play
     from the exact moment the dialogue is spoken, not just from 0:00.
-
-Used for: adding the frame-number stat (the backend already returned it,
-it just wasn't displayed); and a real backend addition for the seek feature
--- only a formatted timestamp string reached the browser, not raw seconds,
-so `web/jobs.py`'s result payload now also includes the decoded frame's own
-PTS in seconds, and the frame image became a clickable element that switches
-to the video tab and seeks to that exact point. Verified against a real
-`<video>` element, not just simulated state: a seek landed `currentTime`
-at the exact requested second and started playback.
 
 
 --------------------------------------------------------------------------------
@@ -335,18 +232,6 @@ at the exact requested second and started playback.
     language field a proper dropdown of every language Whisper supports,
     since users won't know the codes to type.
 
-Used for: `pick_model_size()` in `audio/transcribe.py`, which switches to
-`distil-large-v3` only when the language is the literal, explicitly-given
-string "en" -- never for auto-detect, even if detection would have guessed
-English, since a misdetected non-English video would then hit a model
-architecturally incapable of representing it at all. Also added a `LANGUAGES`
-table (name for every one of large-v3's 100 supported codes -- faster-whisper
-exposes only the codes, not names) backing a new `/api/languages` endpoint
-and a real `<select>` dropdown in the web UI, replacing the earlier free-text
-language field. Verified end-to-end against a real upload job with
-`language=en`: the server actually downloaded and ran `distil-large-v3`,
-confirmed by the new model directory appearing in the weights cache.
-
 
 --------------------------------------------------------------------------------
 20. A REAL CACHING BUG, REPORTED AS "IT KEEPS REDOWNLOADING"
@@ -355,20 +240,6 @@ confirmed by the new model directory appearing in the weights cache.
     The same video redownloads every time instead of using the cache. Also,
     display the matched dialogue text in the web UI the way the terminal
     output already does.
-
-Used for: root-causing a real bug rather than assuming the cache was simply
-missing -- the on-disk cache index had the reference video stored under
-`http://ok.ru/...`, while every actual request in this project uses
-`https://ok.ru/...`; a plain string-keyed dict treated those as two
-different videos, so the (correct, already-working) cache logic never got a
-hit and silently redownloaded on every run. Fixed by normalising the cache
-key (scheme, host case, trailing slash) on every read, not just on write, so
-it self-heals existing on-disk state rather than needing a manual fix.
-Verified directly: a `fetch()` call against the previously-mismatched entry
-returned instantly from cache instead of redownloading. Also added a "Text"
-row to the web UI's result panel, matching the CLI's `Text : "..."` line,
-which was previously only reachable via the frame image's (invisible)
-alt text.
 
 
 --------------------------------------------------------------------------------
@@ -384,23 +255,6 @@ alt text.
     the cache from an earlier run. Remove any remaining unnecessary code and
     dependencies.
 
-Used for: the submission-readiness pass. `DESIGN.md` (841 lines at its
-largest, already shortened once) became `APPROACH.md` at 119 lines,
-restructured under the requested headings rather than as a chronological
-bug journal. A real, audited dead-code/dependency sweep -- not just a
-skim -- found and removed: an unused `Job.host` property (only its own test
-referenced it), an unused `import torchaudio` in `align.py`, an orphaned
-HTML id with no CSS or JS reference, and a genuinely unused `soundfile`
-dependency (confirmed by actually uninstalling it and running a real forced
-alignment end to end before removing it from `pyproject.toml` -- torchaudio
-only needs it as an optional backend for `torchaudio.load()`/`.save()`,
-which this project never calls, decoding audio via PyAV directly instead).
-A `samples/` directory (not gitignored, unlike `outputs/`) was added with
-the actual verified result from a real run -- `result.json` and
-`answer_frame.png` copied from a genuine pipeline execution, not
-fabricated. README.md was restructured around getting a first run working:
-requirements, install, CLI run, web app run, then reference material.
-
 
 --------------------------------------------------------------------------------
 22. A REAL CRASH ON A NUMBER IN THE DIALOGUE, THEN A MATCHING-ACCURACY GAP
@@ -413,24 +267,6 @@ requirements, install, CLI run, web app run, then reference material.
     [Follow-up, after root-causing the crash and reporting that the fix
     also surfaced the video matching the wrong number ("4.5 billion years")
     at a high score:] Yes, look into it.
-
-Used for: root-causing an actual crash rather than a vague "numbers don't
-work" -- confirmed directly that the forced-alignment model's vocabulary is
-27 Latin letters and an apostrophe, no digits at all, so `align_words()`
-handing it "1" and "4" as literal characters raised a bare `KeyError('1')`.
-Fixed by spelling numbers out before alignment ("1.4 billion years" ->
-"one point four billion years", via `num2words`) -- alignment matches audio
-phonetically, and "1" was never pronounceable as a phoneme anyway. Verified
-against the exact reported case: the crash is gone.
-
-That same real run then surfaced a second, distinct bug: the matcher found
-"4.5 billion years" (score 88.2, above threshold) instead of the actual
-"1.4 billion years" spoken later in the video, because "billion years"
-alone carries most of the character-level similarity and `rapidfuzz` has no
-notion that the numbers differ. Fixed by rejecting any candidate missing a
-digit the target mentions, regardless of score. Verified against the same
-real video end to end: it now finds the correct "1.4 billion years" at
-42:18, score 100.0, instead of the wrong match at the video's opening.
 
 
 --------------------------------------------------------------------------------
@@ -445,20 +281,6 @@ real video end to end: it now finds the correct "1.4 billion years" at
     ok.ru has a rate limit to their server. Pull the change entirely and
     revert it back since there was no improvement.
 
-Used for: an honest experiment, not a guess presented as an improvement.
-Added `concurrent_fragment_downloads` to the download options and measured
-it directly rather than assuming it would help: a real before/after
-download of the same YouTube video showed no difference (28.8s vs 29.7s --
-a single connection was already at the bandwidth ceiling, so parallelism had
-nothing to gain). A second test against ok.ru was stopped before finishing,
-once a real, previously-undiscussed risk was raised: ok.ru is documented
-elsewhere in this project as unstable under load, and two back-to-back
-fresh downloads risked triggering rate limiting that would make any timing
-comparison meaningless anyway, independent of the setting being tested.
-Reverted cleanly since neither source showed a real improvement -- verified
-the file matched the prior commit exactly after reverting, not just that it
-looked right.
-
 
 --------------------------------------------------------------------------------
 24. LINUX SUPPORT
@@ -466,21 +288,3 @@ looked right.
 
     Does this app work on Mac and Linux? Is it possible to make it run on
     Linux as well?
-
-Used for: a real investigation, not a guess -- grepped the whole codebase
-for platform-specific code first (found only two branches, both already
-handling non-Windows correctly: a Windows-only DLL-path fix that no-ops
-elsewhere, and `--open`'s file opener, which already falls back to
-`xdg-open` on Linux). The actual blocker was `pyproject.toml`'s dependency
-lock, explicitly restricted to Windows only because of a CUDA-package
-version conflict recorded in a comment there. Tested directly whether that
-conflict still applies by adding Linux to the platform list and running
-`uv lock` for real: it resolved cleanly with no conflict (the underlying
-packages have evidently updated since that comment was written), and `uv
-sync` confirmed the Linux-only packages it added are correctly skipped on
-this Windows machine, disturbing nothing here. macOS was deliberately left
-out: the pinned CUDA index is meaningless there. Documented plainly in
-README.md that Linux resolves cleanly but hasn't been run on an actual
-Linux machine -- dependency resolution was verified for real, runtime
-behavior was not, and the difference between those two is stated
-explicitly rather than implied.
