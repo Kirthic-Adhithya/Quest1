@@ -3,181 +3,432 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Quest1 - Dialogue Frame Finder</title>
+<title>Quest1 - Dialogue to Frame</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Inter+Tight:wght@400;500;600&display=swap">
 <style>
   :root {
-    --bg: #f7f7f8;
-    --card: #ffffff;
-    --border: #e3e3e6;
-    --text: #1c1c1e;
-    --muted: #6b6b70;
-    --accent: #2f5fdb;
-    --accent-hover: #244aad;
-    --error: #c0392b;
-    --success: #1c7a3d;
-    --radius: 10px;
-    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    --radius: 0.375rem;
+    --background: oklch(0.985 0.004 100);
+    --foreground: oklch(0.18 0.012 110);
+    --card: oklch(1 0 0);
+    --muted-foreground: oklch(0.48 0.02 110);
+    --primary: oklch(0.46 0.082 118);
+    --primary-foreground: oklch(0.985 0.006 100);
+    --secondary: oklch(0.945 0.018 108);
+    --secondary-foreground: oklch(0.3 0.05 118);
+    --destructive: oklch(0.55 0.2 27);
+    --destructive-foreground: oklch(0.985 0.003 100);
+    --border: oklch(0.9 0.014 105);
+    --olive: oklch(0.46 0.082 118);
+    --olive-deep: oklch(0.3 0.055 118);
+    --olive-light: oklch(0.72 0.09 120);
+    --ink: oklch(0.16 0.008 110);
+    --shadow-panel: 0 1px 2px oklch(0.2 0.02 110 / 0.06), 0 12px 32px -18px oklch(0.2 0.02 110 / 0.35);
+    --font-display: "Archivo", ui-sans-serif, system-ui, sans-serif;
+    --font-body: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
   body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    display: flex;
-    justify-content: center;
-    padding: 48px 20px;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
     line-height: 1.5;
   }
-  main {
-    width: 100%;
-    max-width: 640px;
+  h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; margin: 0; }
+  svg { display: block; }
+  .icon { width: 16px; height: 16px; flex-shrink: 0; }
+  .icon-sm { width: 14px; height: 14px; }
+
+  /* ---------- header ---------- */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklab, var(--background) 85%, transparent);
+    backdrop-filter: blur(6px);
   }
-  h1 {
-    font-size: 22px;
-    font-weight: 600;
-    margin: 0 0 4px;
+  .header-inner {
+    max-width: 1600px;
+    margin: 0 auto;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 24px;
+    gap: 16px;
   }
-  .subtitle {
-    color: var(--muted);
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius);
+    background: var(--olive-deep);
+    color: var(--primary-foreground);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .brand h1 { font-size: 18px; font-weight: 600; }
+  .brand .tag {
+    margin: 2px 0 0;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--muted-foreground);
+  }
+
+  /* ---------- tab toggles ---------- */
+  .tabs {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--secondary);
+    padding: 4px;
+  }
+  .tabs.full .tab { flex: 1; }
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: none;
+    background: transparent;
+    border-radius: calc(var(--radius) - 2px);
+    padding: 6px 12px;
+    font: inherit;
     font-size: 14px;
-    margin: 0 0 28px;
+    font-weight: 500;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
   }
-  .card {
+  .tab:hover { color: var(--foreground); }
+  .tab.active {
+    background: var(--olive-deep);
+    color: var(--primary-foreground);
+    box-shadow: 0 1px 2px oklch(0.2 0.02 110 / 0.15);
+  }
+
+  /* ---------- layout ---------- */
+  main {
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 24px;
+    display: grid;
+    gap: 24px;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 1024px) {
+    main { grid-template-columns: 380px 1fr; }
+  }
+  .panel {
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 24px;
-    margin-bottom: 20px;
+    box-shadow: var(--shadow-panel);
   }
+  .source-panel { padding: 20px; height: fit-content; }
+  .section-label {
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--muted-foreground);
+  }
+
+  /* ---------- form fields ---------- */
+  .field { margin-top: 18px; }
   label {
     display: block;
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 500;
     margin-bottom: 6px;
-    color: var(--muted);
   }
-  .field {
-    margin-bottom: 16px;
-  }
-  input[type="text"], select {
+  input[type="text"], input[type="url"], textarea, select {
     width: 100%;
-    padding: 10px 12px;
+    padding: 9px 12px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius);
+    font: inherit;
     font-size: 14px;
-    color: var(--text);
-    background: #fff;
+    color: var(--foreground);
+    background: var(--card);
   }
-  input[type="text"]:focus, select:focus {
+  textarea { resize: none; font-family: var(--font-body); }
+  input:focus, textarea:focus, select:focus {
     outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(47, 95, 219, 0.12);
+    border-color: var(--olive);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--olive) 18%, transparent);
   }
-  button {
-    width: 100%;
-    padding: 11px 16px;
-    background: var(--accent);
-    color: #fff;
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* ---------- file drop zone ---------- */
+  .dropzone {
+    cursor: pointer;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 30px 16px;
+    text-align: center;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .dropzone:hover { border-color: var(--olive-light); }
+  .dropzone.dragging { border-color: var(--olive); background: var(--secondary); }
+  .dropzone .icon { margin: 0 auto; color: var(--olive); width: 20px; height: 20px; }
+  .dropzone p { margin: 0; }
+  .dropzone .title { margin-top: 8px; font-size: 14px; font-weight: 500; }
+  .dropzone .hint { margin-top: 4px; font-size: 12px; color: var(--muted-foreground); }
+  .file-chip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--secondary);
+    padding: 10px 12px;
+  }
+  .file-chip span { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-chip button {
     border: none;
-    border-radius: 8px;
+    background: none;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+  }
+  .file-chip button:hover { color: var(--foreground); }
+
+  /* ---------- buttons ---------- */
+  .actions { margin-top: 22px; display: flex; flex-direction: column; gap: 8px; }
+  button.btn {
+    width: 100%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    font: inherit;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s;
+    border: 1px solid transparent;
+    transition: background 0.15s, opacity 0.15s;
   }
-  button:hover:not(:disabled) { background: var(--accent-hover); }
-  button:disabled { opacity: 0.55; cursor: not-allowed; }
-
-  .status {
-    display: none;
-    align-items: center;
-    gap: 10px;
-    font-size: 14px;
-    color: var(--muted);
-  }
-  .status.visible { display: flex; }
-  .spinner {
-    width: 14px;
-    height: 14px;
-    border: 2px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-    flex-shrink: 0;
-  }
+  .btn-primary { background: var(--olive-deep); color: var(--primary-foreground); }
+  .btn-primary:hover:not(:disabled) { background: var(--olive); }
+  .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+  .btn-outline { background: transparent; border-color: var(--border); color: var(--foreground); }
+  .btn-outline:hover:not(:disabled) { background: var(--secondary); }
+  .btn-outline:disabled { opacity: 0.45; cursor: not-allowed; }
+  .spin { animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  #results, #notfound, #errorbox { display: none; }
-  #results.visible, #notfound.visible, #errorbox.visible { display: block; }
-
-  .field-row {
+  /* ---------- viewer panel ---------- */
+  .viewer-panel {
     display: flex;
+    flex-direction: column;
+    min-height: 70vh;
+    overflow: hidden;
+    background-image:
+      linear-gradient(oklch(0.46 0.082 118 / 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(0.46 0.082 118 / 0.05) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .viewer-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     justify-content: space-between;
-    padding: 8px 0;
+    gap: 12px;
     border-bottom: 1px solid var(--border);
-    font-size: 14px;
+    background: var(--card);
+    padding: 12px 20px;
   }
-  .field-row:last-child { border-bottom: none; }
-  .field-row .k { color: var(--muted); }
-  .field-row .v { font-family: var(--mono); text-align: right; max-width: 60%; word-break: break-word; }
-
-  #frame-img {
-    width: 100%;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    margin-top: 14px;
-    display: block;
-  }
-  .actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 16px;
-  }
-  .actions a {
+  .viewer-header .title { font-size: 14px; font-weight: 600; }
+  .stats { display: flex; align-items: center; gap: 16px; font-size: 12px; color: var(--muted-foreground); flex-wrap: wrap; }
+  .stats b { font-weight: 500; color: var(--foreground); }
+  .viewer-body {
     flex: 1;
-    text-align: center;
-    padding: 10px 14px;
-    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .viewer-body img, .viewer-body video {
+    max-height: 72vh;
+    width: 100%;
+    border-radius: var(--radius);
+    background: var(--ink);
+    object-fit: contain;
+  }
+  .frame-wrap {
+    position: relative;
+    max-height: 72vh;
+    width: 100%;
+    cursor: pointer;
+  }
+  .frame-wrap img { display: block; }
+  .play-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border-radius: var(--radius);
+    background: oklch(0.16 0.008 110 / 0.35);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .frame-wrap:hover .play-overlay, .frame-wrap:focus-visible .play-overlay { opacity: 1; }
+  .frame-wrap:focus-visible { outline: 2px solid var(--olive); outline-offset: 2px; border-radius: var(--radius); }
+  .play-circle {
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: var(--card);
+    box-shadow: var(--shadow-panel);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .play-circle svg { width: 22px; height: 22px; color: var(--olive-deep); margin-left: 3px; }
+  .play-label { font-size: 13px; font-weight: 500; color: var(--primary-foreground); }
+  .empty-state { max-width: 360px; text-align: center; }
+  .empty-state .icon-box {
+    margin: 0 auto;
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius);
     border: 1px solid var(--border);
-    color: var(--text);
-    text-decoration: none;
+    background: var(--card);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .empty-state .icon-box .icon { width: 22px; height: 22px; color: var(--olive); }
+  .empty-state .icon-box.destructive .icon { color: var(--destructive); }
+  .empty-state .title { margin-top: 16px; font-size: 16px; font-weight: 600; }
+  .empty-state .body { margin-top: 4px; font-size: 14px; color: var(--muted-foreground); }
+  .near-miss {
+    margin-top: 14px;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--secondary);
     font-size: 13px;
-    font-weight: 600;
+    text-align: left;
   }
-  .actions a:hover { background: var(--bg); }
 
-  #notfound { color: var(--text); }
-  #notfound .title { color: var(--error); font-weight: 600; margin-bottom: 6px; }
-  #notfound .near-miss { font-size: 13px; color: var(--muted); margin-top: 8px; }
-
-  #errorbox { color: var(--error); font-size: 14px; }
-
-  footer {
-    text-align: center;
-    font-size: 12px;
-    color: var(--muted);
-    margin-top: 8px;
+  /* ---------- toasts ---------- */
+  #toasts {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: min(320px, calc(100vw - 32px));
   }
+  .toast {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-panel);
+    padding: 12px 14px;
+    font-size: 13px;
+    animation: toast-in 0.15s ease-out;
+  }
+  .toast.error { border-color: color-mix(in oklab, var(--destructive) 45%, var(--border)); }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+
+  footer { text-align: center; font-size: 12px; color: var(--muted-foreground); padding: 8px 24px 24px; }
 </style>
 </head>
 <body>
-<main>
-  <h1>Quest1</h1>
-  <p class="subtitle">Find the exact frame where a dialogue is spoken.</p>
 
-  <div class="card">
-    <form id="job-form">
-      <div class="field">
-        <label for="url">Video URL</label>
-        <input type="text" id="url" placeholder="https://ok.ru/video/248244667877" autocomplete="off">
+<header>
+  <div class="header-inner">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 7.5h4M17 7.5h4M3 12h18M3 16.5h4M17 16.5h4"/>
+        </svg>
       </div>
-      <div class="field">
-        <label for="dialogue">Dialogue</label>
-        <input type="text" id="dialogue" placeholder="My mind rebels at stagnation" autocomplete="off">
+      <div>
+        <h1>Quest1</h1>
+        <p class="tag">Dialogue &rarr; Frame</p>
       </div>
-      <div class="field">
-        <label for="quality">Download quality</label>
+    </div>
+    <div class="tabs" id="view-tabs">
+      <button type="button" class="tab active" data-view="frame">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+        Show Frame
+      </button>
+      <button type="button" class="tab" data-view="video">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 7.5h4M17 7.5h4M3 12h18M3 16.5h4M17 16.5h4"/></svg>
+        Show Video
+      </button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="panel source-panel">
+    <p class="section-label">Source</p>
+
+    <div class="tabs full" id="mode-tabs" style="margin-top: 16px;">
+      <button type="button" class="tab active" data-mode="url">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        URL
+      </button>
+      <button type="button" class="tab" data-mode="file">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        Local file
+      </button>
+    </div>
+
+    <div class="field" id="url-field">
+      <label for="url">Video URL</label>
+      <input type="url" id="url" placeholder="https://ok.ru/video/248244667877" autocomplete="off">
+    </div>
+
+    <div class="field" id="file-field" style="display: none;">
+      <label>Video file</label>
+      <div class="file-chip" id="file-chip" style="display: none;">
+        <span id="file-name"></span>
+        <button type="button" id="file-clear" aria-label="Remove file">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="dropzone" id="dropzone">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 8 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        <p class="title">Drop a video here</p>
+        <p class="hint">or click to browse &mdash; MP4, MOV, MKV, WEBM</p>
+      </div>
+      <input type="file" id="file-input" accept="video/*" style="display: none;">
+    </div>
+
+    <div class="field">
+      <label for="dialogue">Dialogue</label>
+      <textarea id="dialogue" rows="4" placeholder="Type the exact line spoken in the video&hellip;"></textarea>
+    </div>
+
+    <div class="field grid-2">
+      <div id="quality-field">
+        <label for="quality">Quality</label>
         <select id="quality">
           <option value="mobile">Mobile</option>
           <option value="lowest">Lowest</option>
@@ -187,153 +438,385 @@
           <option value="best">Best</option>
         </select>
       </div>
-      <button type="submit" id="submit-btn">Find frame</button>
-    </form>
-    <div class="status" id="status" style="margin-top: 14px;">
-      <div class="spinner"></div>
-      <span id="status-text">Working...</span>
+      <div>
+        <label for="language">Language</label>
+        <input type="text" id="language" placeholder="e.g. en (blank = auto)" autocomplete="off">
+      </div>
     </div>
-  </div>
 
-  <div class="card" id="results">
-    <div class="field-row"><span class="k">Timestamp</span><span class="v" id="r-timestamp"></span></div>
-    <div class="field-row"><span class="k">Frame</span><span class="v" id="r-frame"></span></div>
-    <div class="field-row"><span class="k">Text</span><span class="v" id="r-text"></span></div>
-    <div class="field-row"><span class="k">Match score</span><span class="v" id="r-score"></span></div>
-    <div class="field-row"><span class="k">Video</span><span class="v" id="r-title"></span></div>
-    <img id="frame-img" alt="Answer frame">
     <div class="actions">
-      <a id="download-image" download>Download frame</a>
-      <a id="download-video" download>Download video</a>
+      <button type="button" class="btn btn-primary" id="find-btn">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.5" y2="16.5"/></svg>
+        <span id="find-btn-label">Find Frame</span>
+      </button>
+      <button type="button" class="btn btn-outline" id="download-btn" disabled>
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        Download video
+      </button>
     </div>
-  </div>
+  </section>
 
-  <div class="card" id="notfound">
-    <div class="title">No confident match found</div>
-    <div id="nf-message"></div>
-    <div class="near-miss" id="nf-near-miss"></div>
-  </div>
-
-  <div class="card" id="errorbox"></div>
-
-  <footer>Done by: Kirthic Adhithya J</footer>
+  <section class="panel viewer-panel">
+    <div class="viewer-header">
+      <p class="title" id="viewer-title">Matched frame</p>
+      <div class="stats">
+        <span>Timestamp <b id="stat-timestamp">&mdash;</b></span>
+        <span>Frame <b id="stat-frame">&mdash;</b></span>
+        <span>Confidence <b id="stat-confidence">&mdash;</b></span>
+        <span id="stat-quality-lang">&mdash;</span>
+      </div>
+    </div>
+    <div class="viewer-body" id="viewer-body">
+      <div class="empty-state" id="empty-state">
+        <div class="icon-box">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+        </div>
+        <p class="title">No frame yet</p>
+        <p class="body">Add a source and a line of dialogue, then run Find Frame.</p>
+      </div>
+      <div class="frame-wrap" id="frame-wrap" role="button" tabindex="0" title="Watch this moment in the video" style="display: none;">
+        <img id="frame-img" alt="Matched frame">
+        <div class="play-overlay" aria-hidden="true">
+          <span class="play-circle">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          </span>
+          <span class="play-label">Watch this moment</span>
+        </div>
+      </div>
+      <video id="video-player" controls style="display: none;"></video>
+    </div>
+  </section>
 </main>
 
+<footer>Done by: Kirthic Adhithya J</footer>
+
+<div id="toasts"></div>
+
 <script>
-const form = document.getElementById('job-form');
-const submitBtn = document.getElementById('submit-btn');
-const statusEl = document.getElementById('status');
-const statusText = document.getElementById('status-text');
-const results = document.getElementById('results');
-const notfound = document.getElementById('notfound');
-const errorbox = document.getElementById('errorbox');
+const $ = (id) => document.getElementById(id);
 
-let pollTimer = null;
-
-function resetPanels() {
-  results.classList.remove('visible');
-  notfound.classList.remove('visible');
-  errorbox.classList.remove('visible');
+// ---------- toasts ----------
+function toast(message, kind) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind === 'error' ? ' error' : '');
+  el.textContent = message;
+  $('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 4000);
 }
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const url = document.getElementById('url').value.trim();
-  const dialogue = document.getElementById('dialogue').value.trim();
-  const quality = document.getElementById('quality').value;
-  if (!url || !dialogue) return;
+// ---------- state ----------
+let mode = 'url';          // 'url' | 'file'
+let view = 'frame';        // 'frame' | 'video'
+let file = null;
+let fileObjectUrl = null;
+let jobId = null;
+let pollTimer = null;
+let lastResult = null;     // { timestamp, frame, text, score, video_title }
+let lastNotFound = null;   // { threshold, near_miss } | null
+let lastError = null;
 
-  resetPanels();
-  submitBtn.disabled = true;
-  statusEl.classList.add('visible');
-  statusText.textContent = 'Queued...';
+// ---------- mode / view tabs ----------
+function setMode(next) {
+  mode = next;
+  document.querySelectorAll('#mode-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+  $('url-field').style.display = mode === 'url' ? '' : 'none';
+  $('file-field').style.display = mode === 'file' ? '' : 'none';
+  $('quality-field').style.display = mode === 'file' ? 'none' : '';
+}
+document.querySelectorAll('#mode-tabs .tab').forEach(t => t.addEventListener('click', () => setMode(t.dataset.mode)));
+
+function setView(next) {
+  view = next;
+  document.querySelectorAll('#view-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.view === view));
+  $('viewer-title').textContent = view === 'frame' ? 'Matched frame' : 'Video playback';
+  renderViewer();
+}
+document.querySelectorAll('#view-tabs .tab').forEach(t => t.addEventListener('click', () => setView(t.dataset.view)));
+
+// ---------- file handling ----------
+function acceptFile(next) {
+  if (!next) return;
+  if (!next.type.startsWith('video/')) {
+    toast("That file isn't a video.", 'error');
+    return;
+  }
+  if (fileObjectUrl) URL.revokeObjectURL(fileObjectUrl);
+  file = next;
+  fileObjectUrl = URL.createObjectURL(next);
+  $('file-name').textContent = file.name;
+  $('file-chip').style.display = '';
+  $('dropzone').style.display = 'none';
+  clearResult();
+}
+function clearFile() {
+  if (fileObjectUrl) URL.revokeObjectURL(fileObjectUrl);
+  file = null;
+  fileObjectUrl = null;
+  $('file-chip').style.display = 'none';
+  $('dropzone').style.display = '';
+  $('file-input').value = '';
+  clearResult();
+}
+$('dropzone').addEventListener('click', () => $('file-input').click());
+$('dropzone').addEventListener('dragover', (e) => { e.preventDefault(); $('dropzone').classList.add('dragging'); });
+$('dropzone').addEventListener('dragleave', () => $('dropzone').classList.remove('dragging'));
+$('dropzone').addEventListener('drop', (e) => {
+  e.preventDefault();
+  $('dropzone').classList.remove('dragging');
+  acceptFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+});
+$('file-input').addEventListener('change', (e) => acceptFile(e.target.files && e.target.files[0]));
+$('file-clear').addEventListener('click', clearFile);
+
+// ---------- submit ----------
+function clearResult() {
+  jobId = null;
+  lastResult = null;
+  lastNotFound = null;
+  lastError = null;
+  $('download-btn').disabled = true;
+  renderViewer();
+  renderStats();
+}
+
+async function findFrame() {
+  const dialogue = $('dialogue').value.trim();
+  const quality = $('quality').value;
+  const language = $('language').value.trim();
+
+  if (mode === 'url' && !$('url').value.trim()) {
+    toast('Paste a video URL first.', 'error');
+    return;
+  }
+  if (mode === 'file' && !file) {
+    toast('Drop or choose a video file first.', 'error');
+    return;
+  }
+  if (!dialogue) {
+    toast('Type the line of dialogue to search for.', 'error');
+    return;
+  }
+
+  clearResult();
+  setSearching(true);
 
   try {
-    const res = await fetch('/api/jobs', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({url, dialogue, quality}),
-    });
+    let res;
+    if (mode === 'file') {
+      const form = new FormData();
+      form.append('video', file);
+      form.append('dialogue', dialogue);
+      form.append('quality', quality);
+      form.append('language', language);
+      res = await fetch('/api/jobs/upload', { method: 'POST', body: form });
+    } else {
+      res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: $('url').value.trim(), dialogue, quality, language: language || null }),
+      });
+    }
     if (!res.ok) {
-      const err = await res.json().catch(() => ({detail: 'Request failed.'}));
+      const err = await res.json().catch(() => ({ detail: 'Request failed.' }));
       throw new Error(err.detail || 'Request failed.');
     }
     const job = await res.json();
-    poll(job.id);
+    jobId = job.id;
+    poll();
   } catch (err) {
-    showError(err.message);
+    setSearching(false);
+    lastError = err.message;
+    renderViewer();
+    toast(err.message, 'error');
   }
-});
+}
+$('find-btn').addEventListener('click', findFrame);
 
-function poll(jobId) {
+function poll() {
   pollTimer = setInterval(async () => {
     try {
       const res = await fetch(`/api/jobs/${jobId}`);
       if (!res.ok) throw new Error('Lost track of the job.');
       const job = await res.json();
-      statusText.textContent = job.stage || 'Working...';
+      setSearching(true, job.stage);
 
       if (job.status === 'done') {
         clearInterval(pollTimer);
-        showResult(jobId, job.result);
+        setSearching(false);
+        lastResult = job.result;
+        $('download-btn').disabled = false;
+        renderViewer();
+        renderStats();
       } else if (job.status === 'not_found') {
         clearInterval(pollTimer);
-        showNotFound(job.result);
+        setSearching(false);
+        lastNotFound = job.result;
+        renderViewer();
       } else if (job.status === 'error') {
         clearInterval(pollTimer);
-        showError(job.error || 'Something went wrong.');
+        setSearching(false);
+        lastError = job.error || 'Something went wrong.';
+        renderViewer();
+        toast(lastError, 'error');
       }
     } catch (err) {
       clearInterval(pollTimer);
-      showError(err.message);
+      setSearching(false);
+      lastError = err.message;
+      renderViewer();
+      toast(err.message, 'error');
     }
   }, 1500);
 }
 
-function finishUI() {
-  submitBtn.disabled = false;
-  statusEl.classList.remove('visible');
+let searching = false;
+let searchStage = '';
+function setSearching(on, stage) {
+  searching = on;
+  searchStage = stage || '';
+  $('find-btn').disabled = on;
+  $('find-btn-label').textContent = on ? 'Searching frames…' : 'Find Frame';
+  const icon = $('find-btn').querySelector('svg');
+  icon.classList.toggle('spin', on);
+  if (on) renderViewer();
 }
 
-function showResult(jobId, result) {
-  finishUI();
-  document.getElementById('r-timestamp').textContent = result.timestamp;
-  document.getElementById('r-frame').textContent = result.frame;
-  document.getElementById('r-text').textContent = `"${result.text}"`;
-  document.getElementById('r-score').textContent = result.score.toFixed(1);
-  document.getElementById('r-title').textContent = result.video_title;
-
-  const img = document.getElementById('frame-img');
-  img.src = `/api/jobs/${jobId}/image?t=${Date.now()}`;
-
-  const dlImg = document.getElementById('download-image');
-  dlImg.href = `/api/jobs/${jobId}/image`;
-  dlImg.download = `frame_${result.frame}.png`;
-
-  const dlVideo = document.getElementById('download-video');
-  dlVideo.href = `/api/jobs/${jobId}/video`;
-
-  results.classList.add('visible');
+// ---------- rendering ----------
+function videoSrc() {
+  if (mode === 'file' && fileObjectUrl) return fileObjectUrl;
+  // The server downloads the video before it knows whether the dialogue
+  // matches, so it's already there once the job reaches either terminal
+  // outcome -- not just on a successful match.
+  if (jobId && (lastResult || lastNotFound)) return `/api/jobs/${jobId}/video`;
+  return null;
 }
 
-function showNotFound(result) {
-  finishUI();
-  document.getElementById('nf-message').textContent =
-    `No occurrence scored above the threshold (${result.threshold}).`;
-  const nm = document.getElementById('nf-near-miss');
-  if (result.near_miss) {
-    nm.textContent = `Closest candidate: "${result.near_miss.text}" at ${result.near_miss.timestamp}, score ${result.near_miss.score} (not returned as an answer).`;
-  } else {
-    nm.textContent = 'No candidate of any score was found in the transcript.';
+function renderViewer() {
+  const empty = $('empty-state');
+  const frameWrap = $('frame-wrap');
+  const img = $('frame-img');
+  const video = $('video-player');
+  frameWrap.style.display = 'none';
+  video.style.display = 'none';
+  empty.style.display = 'none';
+
+  if (lastError) {
+    showEmpty('destructive', xIconSvg(), "This didn't work", lastError);
+    return;
   }
-  notfound.classList.add('visible');
+
+  if (view === 'video') {
+    const src = videoSrc();
+    if (src) {
+      // Only reassign `src` when it actually changed -- browsers restart
+      // playback on assignment even to an identical URL, which would undo
+      // a seek that just landed (see jumpToVideoAt).
+      if (video.getAttribute('src') !== src) video.src = src;
+      video.style.display = '';
+    } else {
+      showEmpty('', filmIconSvg(), 'No video loaded', 'Paste a URL or drop a local file to start playback.');
+    }
+    return;
+  }
+
+  // view === 'frame'
+  if (searching) {
+    showEmpty('', imageIconSvg(), 'Locating the frame…', searchStage || 'Scanning the audio track for your line of dialogue.');
+    return;
+  }
+  if (lastNotFound) {
+    const nm = lastNotFound.near_miss;
+    let body = `No occurrence scored above the threshold (${lastNotFound.threshold}).`;
+    empty.innerHTML = `
+      <div class="icon-box">${imageIconSvg()}</div>
+      <p class="title">No confident match</p>
+      <p class="body">${escapeHtml(body)}</p>
+      ${nm ? `<div class="near-miss">Closest: &ldquo;${escapeHtml(nm.text)}&rdquo; at ${nm.timestamp}, score ${nm.score} (not returned as an answer).</div>` : '<div class="near-miss">No candidate of any score was found.</div>'}
+    `;
+    empty.style.display = '';
+    return;
+  }
+  if (lastResult) {
+    img.src = `/api/jobs/${jobId}/image?t=${Date.now()}`;
+    img.alt = `Frame where the dialogue "${lastResult.text}" is spoken`;
+    frameWrap.style.display = '';
+    return;
+  }
+  showEmpty('', imageIconSvg(), 'No frame yet', 'Add a source and a line of dialogue, then run Find Frame.');
 }
 
-function showError(message) {
-  finishUI();
-  errorbox.textContent = message;
-  errorbox.classList.add('visible');
+function jumpToVideoAt(seconds) {
+  setView('video');
+  const video = $('video-player');
+  const seekTo = () => {
+    video.currentTime = seconds;
+    video.play().catch(() => {});
+  };
+  if (video.readyState >= 1) {
+    seekTo();
+  } else {
+    video.addEventListener('loadedmetadata', seekTo, { once: true });
+  }
 }
+$('frame-wrap').addEventListener('click', () => {
+  if (lastResult) jumpToVideoAt(lastResult.seconds);
+});
+$('frame-wrap').addEventListener('keydown', (e) => {
+  if ((e.key === 'Enter' || e.key === ' ') && lastResult) {
+    e.preventDefault();
+    jumpToVideoAt(lastResult.seconds);
+  }
+});
+
+function showEmpty(kind, iconSvg, title, body) {
+  const empty = $('empty-state');
+  empty.innerHTML = `
+    <div class="icon-box${kind ? ' ' + kind : ''}">${iconSvg}</div>
+    <p class="title">${escapeHtml(title)}</p>
+    <p class="body">${escapeHtml(body)}</p>
+  `;
+  empty.style.display = '';
+}
+
+function renderStats() {
+  $('stat-timestamp').textContent = lastResult ? lastResult.timestamp : '—';
+  $('stat-frame').textContent = lastResult ? lastResult.frame : '—';
+  $('stat-confidence').textContent = lastResult ? `${Math.round(lastResult.score)}%` : '—';
+  const lang = $('language').value.trim() || 'auto';
+  $('stat-quality-lang').textContent = mode === 'file' ? `local file · ${lang}` : `${$('quality').value} · ${lang}`;
+}
+$('quality').addEventListener('change', renderStats);
+$('language').addEventListener('input', renderStats);
+
+// ---------- download ----------
+$('download-btn').addEventListener('click', () => {
+  if (!jobId) return;
+  const a = document.createElement('a');
+  a.href = `/api/jobs/${jobId}/video`;
+  a.download = '';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
+// ---------- inline icons reused across states ----------
+function imageIconSvg() {
+  return '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>';
+}
+function filmIconSvg() {
+  return '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 7.5h4M17 7.5h4M3 12h18M3 16.5h4M17 16.5h4"/></svg>';
+}
+function xIconSvg() {
+  return '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+}
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+renderViewer();
+renderStats();
 </script>
 </body>
 </html>

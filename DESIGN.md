@@ -48,6 +48,11 @@ flowchart TD
 Stages 1-2 (download, transcript) are cached to disk -- expensive and deterministic, so
 iterating on stages 3-6 during development never repeats them.
 
+The web app also accepts a locally uploaded video as an alternative to stage 1: the file
+is probed directly (`ingest/downloader.probe`) and handed straight to stage 2
+(`pipeline.transcribe_media`), skipping `yt-dlp` entirely -- `--quality` has nothing to
+act on in that case, since there's no format ladder to choose from.
+
 ## Data flow
 
 | # | Stage | Output type | Verified value (reference video) |

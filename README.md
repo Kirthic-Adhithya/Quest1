@@ -15,10 +15,10 @@ extract frame -> report, plus a browser UI over the same pipeline. See
 
 ## Web app
 
-A browser UI over the same pipeline: paste a URL and a dialogue, pick a
-download quality, and get back the timestamp, frame number, extracted text,
-match score, and the frame image, plus buttons to download the frame or the
-source video.
+A browser UI over the same pipeline: paste a URL (or drop a local video file), type
+a dialogue, pick a quality and language, and get back the timestamp, frame number,
+extracted text, match score, and the frame image -- with a toggle to view the matched
+frame or play the source video, and a download button for either.
 
 ```bash
 uv run quest1-web
@@ -28,6 +28,11 @@ Then open http://localhost:8000. Jobs run through a single-worker queue -- only 
 video is ever processed at a time, because this pipeline needs most of an 8GB GPU per
 run and running more than one concurrently causes severe slowdown rather than a clean
 error (see DESIGN.md). A second submission simply waits its turn.
+
+A locally dropped file skips the download step entirely -- it's probed and transcribed
+directly, so `--quality` doesn't apply there (it only controls what yt-dlp fetches). At
+most one uploaded file is kept on disk at a time, mirroring the download cache's
+single-video policy.
 
 ## Run
 
@@ -94,7 +99,7 @@ dependency: without a CA bundle the media CDN fails TLS verification.
 src/quest1/
   cli.py        argparse entry point
   inputs.py     URL + dialogue validation
-  pipeline.py   shared download+transcribe entry point, and the Result type
+  pipeline.py   shared download+transcribe entry points, and the Result type
   ingest/
     downloader.py download the media (yt-dlp) and probe its properties (PyAV)
   audio/
@@ -110,7 +115,7 @@ src/quest1/
     output.py     final report + JSON record
   web/
     jobs.py            single-worker job queue wrapping the pipeline
-    app.py             FastAPI backend (POST /api/jobs, GET /api/jobs/{id}, .../image, .../video)
+    app.py             FastAPI backend (POST /api/jobs[/upload], GET /api/jobs/{id}, .../image, .../video)
     static/index.html  the browser UI (self-contained, no build step)
 DESIGN.md        architecture, design decisions, and key findings
 PROMPTS.txt      LLM prompts used during development

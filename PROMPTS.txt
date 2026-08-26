@@ -270,3 +270,31 @@ for, and the project's own stated design principle (match the specific
 target, don't build detectors you don't need) argued against keeping it.
 Quality selection, requested in the same original prompt, was kept -- it's a
 small, genuinely useful option, not a second search modality.
+
+
+--------------------------------------------------------------------------------
+17. RESTYLING THE WEB APP AGAINST A REFERENCE DESIGN
+--------------------------------------------------------------------------------
+
+    I've attached a separate frontend project (Lovable-generated: React,
+    TanStack, shadcn/ui, an Olive/White/Black theme) built from a prompt
+    describing this same tool -- URL or local file input, quality and
+    language selection, a frame/video toggle, drag-and-drop. Bring our own
+    frontend in line with it, reusing its modules where that makes sense,
+    and improve anything it's missing.
+
+Used for: recreating that design (the two-column layout, the olive theme,
+the source/viewer split, the frame-vs-video toggle, drag-and-drop) directly
+in the existing single-file HTML/CSS/JS, rather than adopting its React +
+TanStack + Bun toolchain -- that reference project was a UI mockup with no
+real backend (its "Find Frame" button was a stubbed timeout), and pulling in
+an entire second language ecosystem and build step for a page this simple
+would be the same kind of unjustified complexity the OCR reversion above
+was about avoiding. Also added the two capabilities the reference called for
+that didn't exist yet: a language field (wired to the transcription
+language, previously hardcoded to auto-detect in the web app) and local
+video upload as an alternative to a URL (`POST /api/jobs/upload`), which
+probes and transcribes the uploaded file directly, skipping the download
+step -- and, since quality selection only means something when there's a
+format ladder to choose from, it's hidden in the UI once a local file is
+selected rather than left showing but inert.

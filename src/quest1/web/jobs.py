@@ -17,19 +17,20 @@ new failure mode) in adding one.
 from __future__ import annotations
 
 import queue
+import shutil
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import BinaryIO, Literal
 
 from ..audio.align import AlignError, load_aligner, refine_onset
 from ..audio.extract import AudioExtractError
 from ..audio.transcribe import TranscribeError
-from ..ingest.downloader import DEFAULT_QUALITY, IngestError
-from ..inputs import InvalidInputError, build_job
-from ..pipeline import Result, run_transcription
+from ..ingest.downloader import DEFAULT_QUALITY, IngestError, probe
+from ..inputs import InvalidInputError, build_job, parse_dialogue
+from ..pipeline import Result, run_transcription, transcribe_media
 from ..report.output import render, render_not_found
 from ..search.matcher import DEFAULT_THRESHOLD, best_match, best_near_miss
 from ..video.frames import FrameExtractError, extract_frame
@@ -37,17 +38,26 @@ from ..video.frames import FrameExtractError, extract_frame
 JobStatus = Literal["queued", "running", "done", "error", "not_found"]
 
 MEDIA_DIR = Path("data/media")
+UPLOAD_DIR = Path("data/media/uploads")
 OUTPUT_ROOT = Path("outputs/web")
 
 
 @dataclass
 class Job:
-    """One submitted request and its current state, polled by the frontend."""
+    """One submitted request and its current state, polled by the frontend.
+
+    Either `url` names something to download, or `upload_path` already
+    points at a local file -- never both meaningfully at once. Exactly one
+    of the two source paths in `_process` applies, chosen by whether
+    `upload_path` is set.
+    """
 
     id: str
     url: str
     dialogue: str
     quality: str = DEFAULT_QUALITY
+    language: str | None = None
+    upload_path: Path | None = None
     status: JobStatus = "queued"
     stage: str = "Queued"
     error: str | None = None
@@ -66,13 +76,45 @@ class JobManager:
         self._worker = threading.Thread(target=self._run_worker, daemon=True)
         self._worker.start()
 
-    def submit(self, url: str, dialogue: str, quality: str = DEFAULT_QUALITY) -> Job:
-        """Create a job and enqueue it for the worker thread."""
-        job = Job(id=uuid.uuid4().hex[:12], url=url, dialogue=dialogue, quality=quality)
+    def _enqueue(self, job: Job) -> Job:
+        """Register a job and hand it to the worker thread."""
         with self._lock:
             self._jobs[job.id] = job
         self._queue.put(job.id)
         return job
+
+    def submit(
+        self, url: str, dialogue: str, quality: str = DEFAULT_QUALITY, language: str | None = None
+    ) -> Job:
+        """Create a job for a video at `url` and enqueue it."""
+        job = Job(id=uuid.uuid4().hex[:12], url=url, dialogue=dialogue, quality=quality, language=language)
+        return self._enqueue(job)
+
+    def submit_upload(
+        self,
+        file_obj: BinaryIO,
+        filename: str,
+        dialogue: str,
+        quality: str = DEFAULT_QUALITY,
+        language: str | None = None,
+    ) -> Job:
+        """Save an uploaded video to disk and enqueue a job that skips the
+        download step, probing the local file directly. Evicts any
+        previous upload first -- one at a time, matching the download
+        cache's single-video disk-usage policy."""
+        shutil.rmtree(UPLOAD_DIR, ignore_errors=True)
+        job_id = uuid.uuid4().hex[:12]
+        dest_dir = UPLOAD_DIR / job_id
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = dest_dir / filename
+        with open(dest_path, "wb") as out:
+            shutil.copyfileobj(file_obj, out)
+
+        job = Job(
+            id=job_id, url=f"(uploaded) {filename}", dialogue=dialogue,
+            quality=quality, language=language, upload_path=dest_path,
+        )
+        return self._enqueue(job)
 
     def get(self, job_id: str) -> Job | None:
         """Look up a job by id, for polling."""
@@ -108,19 +150,28 @@ class JobManager:
         extract the frame, and record the result (or a not-found diagnosis)
         onto the job."""
         self._set(job, status="running", stage="Validating input")
-        parsed = build_job(job.url, job.dialogue)
 
-        self._set(job, stage="Downloading media and transcribing audio (first run can take several minutes)")
-        media, transcript = run_transcription(parsed, MEDIA_DIR, job.quality, language=None)
-        job.video_path = media.path
+        if job.upload_path is not None:
+            dialogue = parse_dialogue(job.dialogue)
+            self._set(job, stage="Probing the uploaded video")
+            media = probe(job.upload_path, title=job.upload_path.stem)
+            job.video_path = media.path
+            self._set(job, stage="Transcribing audio (first run can take several minutes)")
+            transcript = transcribe_media(media, MEDIA_DIR, language=job.language)
+        else:
+            parsed = build_job(job.url, job.dialogue)
+            dialogue = parsed.dialogue
+            self._set(job, stage="Downloading media and transcribing audio (first run can take several minutes)")
+            media, transcript = run_transcription(parsed, MEDIA_DIR, job.quality, language=job.language)
+            job.video_path = media.path
 
         self._set(job, stage="Matching dialogue against the transcript")
-        match = best_match(transcript, parsed.dialogue, DEFAULT_THRESHOLD)
+        match = best_match(transcript, dialogue, DEFAULT_THRESHOLD)
 
         output_dir = OUTPUT_ROOT / job.id
         if match is None:
-            near_miss = best_near_miss(transcript, parsed.dialogue)
-            render_not_found(parsed.dialogue, DEFAULT_THRESHOLD, near_miss, output_dir)
+            near_miss = best_near_miss(transcript, dialogue)
+            render_not_found(dialogue, DEFAULT_THRESHOLD, near_miss, output_dir)
             near_miss_dict = None
             if near_miss is not None:
                 mins, secs = divmod(near_miss.start, 60)
@@ -139,7 +190,7 @@ class JobManager:
 
         self._set(job, stage="Refining onset via forced alignment")
         aligner = load_aligner()
-        onset = refine_onset(media.path, parsed.dialogue, match.start, match.end, aligner)
+        onset = refine_onset(media.path, dialogue, match.start, match.end, aligner)
 
         self._set(job, stage="Extracting the answer frame")
         hit = extract_frame(media.path, onset, media.fps)
@@ -153,6 +204,7 @@ class JobManager:
             stage="Done",
             result={
                 "timestamp": result.timestamp,
+                "seconds": result.hit.pts_time,
                 "frame": result.frame,
                 "text": result.match.text,
                 "score": round(result.match.score, 1),

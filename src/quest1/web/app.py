@@ -6,9 +6,10 @@ Then open: http://localhost:8000
 
 from __future__ import annotations
 
+import mimetypes
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -20,6 +21,12 @@ app = FastAPI(title="Quest1 - Dialogue Frame Finder")
 
 STATIC_DIR = Path(__file__).parent / "static"
 
+#: Rejected by extension, not by sniffing file contents -- a browser's own
+#: file picker/drag-drop already filters to video/* via the frontend's
+#: `accept` attribute, so this is a second, server-side check against a
+#: request that bypassed that (e.g. a raw API call), not a security boundary.
+ALLOWED_UPLOAD_EXTENSIONS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
+
 
 class SubmitRequest(BaseModel):
     """Request body for POST /api/jobs."""
@@ -27,6 +34,7 @@ class SubmitRequest(BaseModel):
     url: str
     dialogue: str
     quality: str = DEFAULT_QUALITY
+    language: str | None = None
 
 
 def _job_view(job: Job) -> dict:
@@ -40,14 +48,44 @@ def _job_view(job: Job) -> dict:
     }
 
 
+def _clean_language(language: str | None) -> str | None:
+    """Blank input means auto-detect; anything else is passed through as
+    the ISO language code faster-whisper expects (e.g. "en", "fr")."""
+    if language is None:
+        return None
+    language = language.strip()
+    return language or None
+
+
 @app.post("/api/jobs")
 def submit_job(req: SubmitRequest) -> dict:
-    """Queue a new job and return its initial state."""
+    """Queue a new job for a video URL and return its initial state."""
     if not req.url.strip() or not req.dialogue.strip():
         raise HTTPException(400, "Both a URL and a dialogue are required.")
     if req.quality not in QUALITY_CHOICES:
         raise HTTPException(400, f"quality must be one of {QUALITY_CHOICES}.")
-    job = manager.submit(req.url.strip(), req.dialogue.strip(), req.quality)
+    job = manager.submit(req.url.strip(), req.dialogue.strip(), req.quality, _clean_language(req.language))
+    return _job_view(job)
+
+
+@app.post("/api/jobs/upload")
+def submit_upload(
+    dialogue: str = Form(...),
+    quality: str = Form(DEFAULT_QUALITY),
+    language: str = Form(""),
+    video: UploadFile = File(...),
+) -> dict:
+    """Queue a new job for a locally uploaded video file, instead of a URL."""
+    if not dialogue.strip():
+        raise HTTPException(400, "Dialogue is required.")
+    if quality not in QUALITY_CHOICES:
+        raise HTTPException(400, f"quality must be one of {QUALITY_CHOICES}.")
+    if not video.filename or not video.filename.lower().endswith(ALLOWED_UPLOAD_EXTENSIONS):
+        raise HTTPException(400, f"File must be one of: {', '.join(ALLOWED_UPLOAD_EXTENSIONS)}.")
+
+    job = manager.submit_upload(
+        video.file, video.filename, dialogue.strip(), quality, _clean_language(language)
+    )
     return _job_view(job)
 
 
@@ -75,9 +113,10 @@ def get_job_video(job_id: str) -> FileResponse:
     job = manager.get(job_id)
     if job is None or job.video_path is None or not job.video_path.exists():
         raise HTTPException(404, "No video available for this job.")
+    media_type = mimetypes.guess_type(job.video_path.name)[0] or "video/mp4"
     return FileResponse(
         job.video_path,
-        media_type="video/mp4",
+        media_type=media_type,
         filename=job.video_path.name,
     )
 
